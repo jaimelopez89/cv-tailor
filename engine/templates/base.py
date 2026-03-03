@@ -197,7 +197,9 @@ class BaseTemplate:
             name = self.h(v.get("name", ""))
             period = self.h(v.get("period", ""))
             desc = self.h(v.get("description", ""))
-            items += f'<div class="venture"><div class="venture-header"><strong>{name}</strong><span class="period">{period}</span></div><p>{desc}</p></div>\n'
+            url = v.get("url", "")
+            url_html = f' <a href="https://{self.h(url)}" class="venture-link">{self.h(url)}</a>' if url else ""
+            items += f'<div class="venture"><div class="venture-header"><span class="venture-name"><strong>{name}</strong>{url_html}</span><span class="period">{period}</span></div><p>{desc}</p></div>\n'
         return items
 
     def html_education(self, education):

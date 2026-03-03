@@ -1,0 +1,7 @@
+# Test corrections
+summary: Replace "data infrastructure companies" with "AI-native companies"
+ververica.bullet.add: "Launched Flink Agents product line, driving 40% increase in enterprise pipeline"
+skills.remove: HubSpot
+speaking.remove: Ops Cast
+notable.add: "3× Board Member advisor for growth-stage companies"
+speaking.show_max: 4

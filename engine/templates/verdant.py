@@ -230,8 +230,14 @@ class VerdantTemplate(BaseTemplate):
         if ventures:
             ly = self._col_section(c, ML, ly, lw, "Ventures & Advisory")
             for v in ventures:
+                vname = self.s(v.get("name", ""))
                 c.setFont("Poppins-SemiBold", 9); c.setFillColor(NEAR_BLK)
-                c.drawString(ML, ly, self.s(v.get("name", "")))
+                c.drawString(ML, ly, vname)
+                vurl = self.s(v.get("url", ""))
+                if vurl:
+                    x_url = ML + c.stringWidth(vname, "Poppins-SemiBold", 9) + 6
+                    c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(SOFT)
+                    c.drawString(x_url, ly + 0.5, vurl)
                 per = self.s(v.get("period", ""))
                 if per:
                     c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
@@ -434,6 +440,9 @@ ul.bullets li::before { content: ''; width: 5px; height: 5px; background: var(--
 .col-left section, .col-right section { padding: 0; margin-bottom: 20px; }
 .venture, .edu-entry { margin-bottom: 16px; }
 .venture-header { display: flex; justify-content: space-between; align-items: baseline; }
+.venture-name { display: flex; align-items: baseline; gap: 6px; }
+.venture-link { font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--soft); text-decoration: none; }
+.venture-link:hover { color: var(--forest); }
 .edu-school { display: block; font-weight: 600; font-size: 11px; color: var(--near-blk); margin-bottom: 1px; }
 .edu-period { display: block; font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--soft); margin-bottom: 2px; }
 .venture p, .edu-detail { font-size: 9.5px; line-height: 1.5; margin-top: 2px; }

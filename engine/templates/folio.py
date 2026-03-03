@@ -239,8 +239,14 @@ class FolioTemplate(BaseTemplate):
                 per = self.s(v.get("period", ""))
                 c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
                 c.drawRightString(ML + DATE_W, y + 1, per)
+                vname = self.s(v.get("name", ""))
                 c.setFont("Poppins-SemiBold", 9); c.setFillColor(CHARCOAL)
-                c.drawString(CONTENT_X, y, self.s(v.get("name", "")))
+                c.drawString(CONTENT_X, y, vname)
+                vurl = self.s(v.get("url", ""))
+                if vurl:
+                    x_url = CONTENT_X + c.stringWidth(vname, "Poppins-SemiBold", 9) + 6
+                    c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(SOFT)
+                    c.drawString(x_url, y + 0.5, vurl)
                 y -= 12
                 desc = self.s(v.get("description", ""))
                 if desc:
@@ -396,9 +402,11 @@ class FolioTemplate(BaseTemplate):
         for v in ct.get("ventures", []):
             if v.get("_hidden"):
                 continue
+            vurl = v.get("url", "")
+            url_html = f' <a href="https://{self.h(vurl)}" class="venture-link">{self.h(vurl)}</a>' if vurl else ""
             ventures_html += f"""<div class="entry-row">
 <div class="date-col">{self.h(v.get("period", ""))}</div>
-<div class="content-col"><strong>{self.h(v.get("name", ""))}</strong><p>{self.h(v.get("description", ""))}</p></div></div>\n"""
+<div class="content-col"><span class="venture-name"><strong>{self.h(v.get("name", ""))}</strong>{url_html}</span><p>{self.h(v.get("description", ""))}</p></div></div>\n"""
 
         # Build education with date column (no details — location info is superfluous in Folio)
         edu_html = ""
@@ -493,6 +501,9 @@ ul.bullets li { font-size: 10px; line-height: 1.55; color: var(--body); padding:
 ul.bullets li::before { content: '\\25b8'; color: var(--terra-lt); position: absolute; left: 0; font-size: 9px; }
 .exp-entry, .entry-row { margin-bottom: 12px; }
 .venture p, .edu-detail { font-size: 9.5px; line-height: 1.5; margin-top: 2px; }
+.venture-name { display: flex; align-items: baseline; gap: 6px; }
+.venture-link { font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--soft); text-decoration: none; }
+.venture-link:hover { color: var(--terra); }
 .degree { font-size: 10px; margin-top: 1px; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; padding: 20px 62px 0; padding-bottom: 40px; }
 .two-col section { padding: 0; }

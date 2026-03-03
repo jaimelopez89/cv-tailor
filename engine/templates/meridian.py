@@ -250,8 +250,14 @@ class MeridianTemplate(BaseTemplate):
         if ventures:
             y = self._main_section(c, y, "Ventures & Advisory")
             for v in ventures:
+                vname = self.s(v.get("name",""))
                 c.setFont("Poppins-SemiBold", 9); c.setFillColor(SLATE_D)
-                c.drawString(MAIN_X, y, self.s(v.get("name","")))
+                c.drawString(MAIN_X, y, vname)
+                vurl = self.s(v.get("url",""))
+                if vurl:
+                    x_url = MAIN_X + c.stringWidth(vname, "Poppins-SemiBold", 9) + 6
+                    c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(DIM)
+                    c.drawString(x_url, y + 0.5, vurl)
                 per = self.s(v.get("period",""))
                 if per:
                     c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(DIM)
@@ -407,6 +413,9 @@ ul.bullets { list-style: none; padding: 3px 0 0; }
 ul.bullets li { font-size: 9.5px; line-height: 1.5; padding: 2px 0 2px 0; color: var(--body); }
 .venture, .edu-entry { margin-bottom: 16px; }
 .venture-header, .edu-header { display: flex; justify-content: space-between; align-items: baseline; }
+.venture-name { display: flex; align-items: baseline; gap: 6px; }
+.venture-link { font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--dim); text-decoration: none; }
+.venture-link:hover { color: var(--blue); }
 .venture p { font-size: 9px; margin-top: 2px; }
 .speak-entry { display: flex; justify-content: space-between; font-size: 9.5px; margin-bottom: 4px; }
 .speak-year { font-family: 'Source Code Pro', monospace; font-size: 8.5px; color: var(--dim); }

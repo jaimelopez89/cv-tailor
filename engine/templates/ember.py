@@ -206,8 +206,14 @@ class EmberTemplate(BaseTemplate):
         y = top
         for v in [v for v in ct.get("ventures",[]) if not v.get("_hidden")]:
             if y == top: y = self._col_section(c, ML, y, lw, "Ventures & Advisory")
+            vname = self.s(v.get("name",""))
             c.setFont("Poppins-SemiBold", 9.5); c.setFillColor(INK)
-            c.drawString(ML, y, self.s(v.get("name","")))
+            c.drawString(ML, y, vname)
+            vurl = self.s(v.get("url",""))
+            if vurl:
+                x_url = ML + c.stringWidth(vname, "Poppins-SemiBold", 9.5) + 6
+                c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
+                c.drawString(x_url, y + 0.5, vurl)
             per = self.s(v.get("period",""))
             if per:
                 c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
@@ -396,6 +402,9 @@ ul.bullets li::before { content: '\\2022'; color: var(--rust); position: absolut
 .col-left section, .col-right section { padding: 0; margin-bottom: 20px; }
 .venture, .edu-entry { margin-bottom: 16px; }
 .venture-header { display: flex; justify-content: space-between; align-items: baseline; }
+.venture-name { display: flex; align-items: baseline; gap: 6px; }
+.venture-link { font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--light); text-decoration: none; }
+.venture-link:hover { color: var(--rust); }
 .venture p, .edu-detail { font-size: 9.5px; color: var(--slate); line-height: 1.5; margin-top: 2px; }
 .edu-school { display: block; font-weight: 600; font-size: 12px; color: var(--ink); margin-bottom: 1px; }
 .edu-period { display: block; font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--light); margin-bottom: 2px; }
