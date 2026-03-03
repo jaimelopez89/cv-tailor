@@ -268,13 +268,6 @@ class FolioTemplate(BaseTemplate):
                 elif per:
                     c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
                     c.drawRightString(ML + DATE_W, y + 1, per); y -= 11
-                details = e.get("details", [])
-                if isinstance(details, str):
-                    details = [x.strip() for x in details.split(";") if x.strip()]
-                for d in details:
-                    st = self.make_style("ed", "Poppins-Regular", 6.5, GREY, leading=9)
-                    h = self.draw_wrapped(c, d, st, CONTENT_X + 4, y, CONTENT_W - 4)
-                    y -= h + 2
                 y -= 8
 
         projects = ct.get("projects", [])
@@ -407,16 +400,12 @@ class FolioTemplate(BaseTemplate):
 <div class="date-col">{self.h(v.get("period", ""))}</div>
 <div class="content-col"><strong>{self.h(v.get("name", ""))}</strong><p>{self.h(v.get("description", ""))}</p></div></div>\n"""
 
-        # Build education with date column
+        # Build education with date column (no details — location info is superfluous in Folio)
         edu_html = ""
         for e in ct.get("education", []):
-            raw_det = e.get("details", [])
-            if isinstance(raw_det, str):
-                raw_det = [x.strip() for x in raw_det.split(";") if x.strip()]
-            details = "".join(f"<p class='edu-detail'>{self.h(d)}</p>" for d in raw_det)
             edu_html += f"""<div class="entry-row">
 <div class="date-col">{self.h(e.get("period", ""))}</div>
-<div class="content-col"><strong>{self.h(e.get("school", ""))}</strong><p class="degree">{self.h(e.get("degree", ""))}</p>{details}</div></div>\n"""
+<div class="content-col"><strong>{self.h(e.get("school", ""))}</strong><p class="degree">{self.h(e.get("degree", ""))}</p></div></div>\n"""
 
         metrics_html = ""
         for m in ct.get("metrics", [])[:4]:
@@ -505,8 +494,9 @@ ul.bullets li::before { content: '\\25b8'; color: var(--terra-lt); position: abs
 .exp-entry, .entry-row { margin-bottom: 12px; }
 .venture p, .edu-detail { font-size: 9.5px; line-height: 1.5; margin-top: 2px; }
 .degree { font-size: 10px; margin-top: 1px; }
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; padding: 20px 62px 0; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; padding: 20px 62px 0; padding-bottom: 40px; }
 .two-col section { padding: 0; }
+footer { display: flex; justify-content: space-between; padding: 12px 62px; font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--soft); border-top: 1px solid var(--rule); margin-top: 4px; }
 .skill-group { margin-bottom: 10px; }
 .skill-group h4 { font-weight: 500; font-size: 10px; color: var(--dark); margin-bottom: 3px; }
 .skill-group p { font-size: 9px; color: var(--grey); line-height: 1.5; }

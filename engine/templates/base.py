@@ -212,7 +212,8 @@ class BaseTemplate:
             if isinstance(details, str):
                 details = [d.strip() for d in details.split(";") if d.strip()]
             det_html = "".join(f"<p class='edu-detail'>{self.h(d)}</p>" for d in details)
-            items += f'<div class="edu-entry"><strong class="edu-school">{school}</strong><div class="edu-degree-row"><p class="degree">{degree}</p><span class="period">{period}</span></div>{det_html}</div>\n'
+            period_html = f'<span class="edu-period">{period}</span>' if period else ""
+            items += f'<div class="edu-entry"><strong class="edu-school">{school}</strong>{period_html}<p class="degree">{degree}</p>{det_html}</div>\n'
         return items
 
     def html_skills(self, skills):

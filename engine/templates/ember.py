@@ -147,10 +147,11 @@ class EmberTemplate(BaseTemplate):
         bullets = entry.get("bullets",[])
 
         c.setFont("Poppins-SemiBold", 9.5); c.setFillColor(INK)
-        company_str = company
+        c.drawString(ML, y, company)
         if location:
-            company_str += f"  \u00b7  {location}"
-        c.drawString(ML, y, company_str)
+            x_loc = ML + c.stringWidth(company, "Poppins-SemiBold", 9.5) + 5
+            c.setFont("Poppins-Regular", 7.5); c.setFillColor(DIM)
+            c.drawString(x_loc, y + 0.5, f"\u00b7  {location}")
         yr = self.year_range(roles)
         if yr:
             c.setFont("Poppins-Medium", 9); c.setFillColor(CHARCOAL)
@@ -224,11 +225,12 @@ class EmberTemplate(BaseTemplate):
             for e in edu:
                 c.setFont("Poppins-SemiBold", 9.5); c.setFillColor(INK)
                 c.drawString(ML, y, self.s(e.get("school","")))
+                y -= 12
                 per = self.s(e.get("period",""))
                 if per:
                     c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
-                    c.drawRightString(ML+lw, y+1, per)
-                y -= 13
+                    c.drawString(ML, y, per)
+                    y -= 10
                 deg = self.s(e.get("degree",""))
                 if deg:
                     c.setFont("Poppins-Regular", 7.5); c.setFillColor(SLATE)
@@ -395,10 +397,8 @@ ul.bullets li::before { content: '\\2022'; color: var(--rust); position: absolut
 .venture, .edu-entry { margin-bottom: 16px; }
 .venture-header { display: flex; justify-content: space-between; align-items: baseline; }
 .venture p, .edu-detail { font-size: 9.5px; color: var(--slate); line-height: 1.5; margin-top: 2px; }
-.edu-school { display: block; font-weight: 600; font-size: 12px; color: var(--ink); margin-bottom: 2px; }
-.edu-degree-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.edu-degree-row .degree { flex: 1; min-width: 0; }
-.edu-degree-row .period { flex-shrink: 0; white-space: nowrap; }
+.edu-school { display: block; font-weight: 600; font-size: 12px; color: var(--ink); margin-bottom: 1px; }
+.edu-period { display: block; font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--light); margin-bottom: 2px; }
 .degree { font-size: 10px; color: var(--slate); margin-top: 1px; }
 .notable-item { font-size: 10px; line-height: 1.5; padding-left: 16px; position: relative; margin-bottom: 4px; }
 .notable-item::before { content: '\\25c6'; color: var(--rust); position: absolute; left: 0; font-size: 6px; top: 3px; }

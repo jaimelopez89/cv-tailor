@@ -251,11 +251,12 @@ class VerdantTemplate(BaseTemplate):
             for e in edu:
                 c.setFont("Poppins-SemiBold", 9); c.setFillColor(NEAR_BLK)
                 c.drawString(ML, ly, self.s(e.get("school", "")))
+                ly -= 11
                 per = self.s(e.get("period", ""))
                 if per:
                     c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
-                    c.drawRightString(ML + lw, ly + 1, per)
-                ly -= 12
+                    c.drawString(ML, ly, per)
+                    ly -= 9
                 deg = self.s(e.get("degree", ""))
                 if deg:
                     c.setFont("Poppins-Regular", 7.5); c.setFillColor(BODY)
@@ -433,10 +434,8 @@ ul.bullets li::before { content: ''; width: 5px; height: 5px; background: var(--
 .col-left section, .col-right section { padding: 0; margin-bottom: 20px; }
 .venture, .edu-entry { margin-bottom: 16px; }
 .venture-header { display: flex; justify-content: space-between; align-items: baseline; }
-.edu-school { display: block; font-weight: 600; font-size: 11px; color: var(--near-blk); margin-bottom: 2px; }
-.edu-degree-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.edu-degree-row .degree { flex: 1; min-width: 0; }
-.edu-degree-row .period { flex-shrink: 0; white-space: nowrap; }
+.edu-school { display: block; font-weight: 600; font-size: 11px; color: var(--near-blk); margin-bottom: 1px; }
+.edu-period { display: block; font-family: 'Source Code Pro', monospace; font-size: 9px; color: var(--soft); margin-bottom: 2px; }
 .venture p, .edu-detail { font-size: 9.5px; line-height: 1.5; margin-top: 2px; }
 .degree { font-size: 10px; margin-top: 1px; }
 .notable-item { font-size: 10px; line-height: 1.55; padding-left: 16px; position: relative; margin-bottom: 5px; }

@@ -642,6 +642,7 @@ function renderVentures() {
         <div class="card-body">
           <div class="form-grid">
             <div class="form-group"><label>Name</label><input type="text" value="${esc(v.name||v)}" oninput="updateVenture(${i},'name',this.value);markDirty()"></div>
+            <div class="form-group"><label>Period</label><input type="text" value="${esc(v.period||'')}" placeholder="2022 – Present" oninput="updateVenture(${i},'period',this.value);markDirty()"></div>
             <div class="form-group"><label>URL</label><input type="text" value="${esc(v.url||'')}" oninput="updateVenture(${i},'url',this.value);markDirty()"></div>
             <div class="form-group span-2"><label>Description</label><input type="text" value="${esc(v.description||'')}" oninput="updateVenture(${i},'description',this.value);markDirty()"></div>
           </div>
@@ -1064,12 +1065,11 @@ async function exportMasterPDF() {
   btn.innerHTML = '<span class="spinner"></span> Generating…';
   try {
     collectFormData();
-    await api('PUT', '/api/profile', state.profile);
     const name = (state.profile?.meta?.name || 'cv').replace(/\s+/g, '_').toLowerCase();
     const res = await fetch('/api/export/pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template: state.selectedTemplate, filename: name }),
+      body: JSON.stringify({ content: state.profile, template: state.selectedTemplate, filename: name }),
     });
     if (!res.ok) throw new Error('Export failed');
     const blob = await res.blob();

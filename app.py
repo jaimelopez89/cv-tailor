@@ -234,10 +234,17 @@ class _TextExtractor(HTMLParser):
 
 
 def _fetch_url_text(url: str) -> str:
-    import urllib.request
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=15, context=SSL_CONTEXT) as resp:
-        html = resp.read().decode("utf-8", errors="replace")
+    import httpx
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+    }
+    with httpx.Client(follow_redirects=True, timeout=15, verify=certifi.where()) as client:
+        resp = client.get(url, headers=headers)
+        resp.raise_for_status()
+        html = resp.text
     extractor = _TextExtractor()
     extractor.feed(html)
     text = " ".join(extractor.texts)
