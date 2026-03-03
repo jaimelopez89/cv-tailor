@@ -188,7 +188,7 @@ class MeridianTemplate(BaseTemplate):
                     y = PAGE_H - 24
                     y = self._main_section(c, y, "Experience (continued)")
                 y = self._draw_exp(c, y, entry)
-                if i < len(exp)-1: y -= 12
+                if i < len(exp)-1: y -= 16
 
         # Footer
         c.setFont("SourceCodePro-Regular", 6); c.setFillColor(DIM)
@@ -219,19 +219,19 @@ class MeridianTemplate(BaseTemplate):
             c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(DIM)
             c.drawRightString(MAIN_X+MAIN_W, y+1, self.s(role.get("period","")))
             y -= 12
-        y -= 3
+        y -= 1
         bst = self.make_style("mb", "Poppins-Regular", 7.5, BODY, leading=11)
         for b in entry.get("bullets",[]):
             txt = self.s(b.get("text","") if isinstance(b, dict) else str(b))
             if not txt: continue
             # Cyan dot in margin, text aligned with company/roles
             c.setFillColor(CYAN)
-            c.circle(MAIN_X - 5, y - 5, 1.2, fill=1, stroke=0)
+            c.circle(MAIN_X - 5, y - 7, 1.2, fill=1, stroke=0)
             h = self.draw_wrapped(c, txt, bst, MAIN_X, y, MAIN_W); y -= h + 2.5
         return y
 
     def _measure_exp(self, entry):
-        h = 11 + (11 if entry.get("subtitle") else 0) + len(entry.get("roles",[]))*12 + 3
+        h = 11 + (11 if entry.get("subtitle") else 0) + len(entry.get("roles",[]))*12 + 1
         bst = self.make_style("mm", "Poppins-Regular", 7.5, BODY, leading=11)
         for b in entry.get("bullets",[]):
             txt = b.get("text","") if isinstance(b, dict) else str(b)
@@ -260,7 +260,8 @@ class MeridianTemplate(BaseTemplate):
                 desc = self.s(v.get("description",""))
                 if desc:
                     st = self.make_style("vd", "Poppins-Regular", 7.5, BODY, leading=10.5)
-                    h = self.draw_wrapped(c, desc, st, MAIN_X, y, MAIN_W); y -= h + 8
+                    h = self.draw_wrapped(c, desc, st, MAIN_X, y, MAIN_W); y -= h
+                y -= 14
 
         projects = ct.get("projects",[])
         if projects:
@@ -278,6 +279,8 @@ class MeridianTemplate(BaseTemplate):
                 if desc:
                     st = self.make_style("pd", "Poppins-Regular", 7, BODY, leading=10.5)
                     h = self.draw_wrapped(c, desc, st, MAIN_X, y, MAIN_W); y -= h + 10
+                else:
+                    y -= 10
 
         speaking = ct.get("speaking",[])
         if speaking:
@@ -402,12 +405,12 @@ main section { margin-bottom: 22px; }
 .role-period { font-family: 'Source Code Pro', monospace; font-size: 8.5px; color: var(--dim); }
 ul.bullets { list-style: none; padding: 3px 0 0; }
 ul.bullets li { font-size: 9.5px; line-height: 1.5; padding: 2px 0 2px 0; color: var(--body); }
-.venture, .edu-entry { margin-bottom: 8px; }
+.venture, .edu-entry { margin-bottom: 16px; }
 .venture-header, .edu-header { display: flex; justify-content: space-between; align-items: baseline; }
 .venture p { font-size: 9px; margin-top: 2px; }
 .speak-entry { display: flex; justify-content: space-between; font-size: 9.5px; margin-bottom: 4px; }
 .speak-year { font-family: 'Source Code Pro', monospace; font-size: 8.5px; color: var(--dim); }
-.project { margin-bottom: 8px; }
+.project { margin-bottom: 14px; }
 .project strong, .project-link { font-size: 10px; color: var(--slate); font-weight: 600; }
 .project-link { text-decoration: none; border-bottom: 1px solid var(--faint); }
 .project-link:hover { color: var(--cyan); border-color: var(--cyan); }

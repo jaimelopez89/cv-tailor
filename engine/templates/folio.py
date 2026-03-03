@@ -190,7 +190,7 @@ class FolioTemplate(BaseTemplate):
             c.drawRightString(ML + DATE_W, y + 1, per)
             y -= 13
 
-        y -= 2
+        y -= 0
         bst = self.make_style("b", "Poppins-Regular", 7.5, BODY, leading=11)
         for b in bullets:
             txt = self.s(b.get("text", "") if isinstance(b, dict) else str(b))
@@ -199,14 +199,14 @@ class FolioTemplate(BaseTemplate):
             # Triangle bullet in margin, text aligned with company/roles
             c.setFillColor(TERRA_LT)
             c.setFont("Poppins-Regular", 6)
-            c.drawString(CONTENT_X - 8, y - 4, "\u25b8")
+            c.drawString(CONTENT_X - 8, y - 7, "\u25b8")
             h = self.draw_wrapped(c, txt, bst, CONTENT_X, y, CONTENT_W)
             y -= h + 2.5
         return y
 
     def _measure_exp(self, entry):
         h = 12 + (11 if entry.get("subtitle") else 0)
-        h += len(entry.get("roles", [])) * 13 + 2
+        h += len(entry.get("roles", [])) * 13 + 0
         bst = self.make_style("m", "Poppins-Regular", 7.5, BODY, leading=11)
         for b in entry.get("bullets", []):
             txt = b.get("text", "") if isinstance(b, dict) else str(b)
@@ -246,7 +246,8 @@ class FolioTemplate(BaseTemplate):
                 if desc:
                     st = self.make_style("vd", "Poppins-Regular", 7, BODY, leading=10)
                     h = self.draw_wrapped(c, desc, st, CONTENT_X, y, CONTENT_W)
-                    y -= h + 8
+                    y -= h
+                y -= 14
 
         edu = ct.get("education", [])
         if edu:
@@ -267,7 +268,10 @@ class FolioTemplate(BaseTemplate):
                 elif per:
                     c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
                     c.drawRightString(ML + DATE_W, y + 1, per); y -= 11
-                for d in e.get("details", []):
+                details = e.get("details", [])
+                if isinstance(details, str):
+                    details = [details] if details else []
+                for d in details:
                     st = self.make_style("ed", "Poppins-Regular", 6.5, GREY, leading=9)
                     h = self.draw_wrapped(c, d, st, CONTENT_X + 4, y, CONTENT_W - 4)
                     y -= h + 2
@@ -509,7 +513,7 @@ ul.bullets li::before { content: '\\25b8'; color: var(--terra-lt); position: abs
 .speak-year { font-size: 8.5px; color: var(--soft); }
 .notable-item { font-size: 9.5px; line-height: 1.5; padding-left: 12px; position: relative; margin-bottom: 4px; }
 .notable-item::before { content: '\\25b8'; color: var(--terra-lt); position: absolute; left: 0; font-size: 8px; top: 2px; }
-.project { margin-bottom: 8px; }
+.project { margin-bottom: 14px; }
 .project strong, .project-link { font-size: 10px; color: var(--charcoal); font-weight: 600; }
 .project-link { text-decoration: none; border-bottom: 1px solid var(--rule); }
 .project-link:hover { color: var(--terra); border-color: var(--terra); }

@@ -750,6 +750,7 @@ async function runTailor() {
     });
     state.tailored = res.tailored;
     state.tailoredDiff = res.diff;
+    state._focusAreas = res.focus_areas || null;
     state._jdPreview = res.jd_preview;
     state._urlWarning = res.url_warning || null;
     renderContent();
@@ -836,6 +837,21 @@ function renderDiff() {
       </div>`;
   }).join('');
 
+  // Focus areas panel
+  let focusHtml = '';
+  const fa = state._focusAreas;
+  if (fa && (fa.keywords?.length || fa.themes?.length || fa.suggestions?.length)) {
+    const kwHtml = (fa.keywords || []).map(k => `<span class="focus-tag focus-tag-kw">${esc(k)}</span>`).join('');
+    const thHtml = (fa.themes || []).map(t => `<span class="focus-tag focus-tag-th">${esc(t)}</span>`).join('');
+    const sugHtml = (fa.suggestions || []).map(s => `<li>${esc(s)}</li>`).join('');
+    focusHtml = `
+      <div class="focus-panel">
+        <h3 class="focus-panel-title">Focus Areas &amp; Interview Prep</h3>
+        ${kwHtml || thHtml ? `<div class="focus-tags">${kwHtml}${thHtml}</div>` : ''}
+        ${sugHtml ? `<ul class="focus-suggestions">${sugHtml}</ul>` : ''}
+      </div>`;
+  }
+
   return `
     <div>
       <div class="flex-between mb-3">
@@ -846,6 +862,7 @@ function renderDiff() {
         </div>
       </div>
       ${state._urlWarning ? `<div style="background:#fef3c7;border:1px solid #fcd34d;color:#92400e;padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:10px;">⚠️ ${esc(state._urlWarning)}</div>` : ''}
+      ${focusHtml}
       ${state._jdPreview ? `<div class="jd-preview"><strong>JD preview:</strong> ${esc(state._jdPreview)}…</div>` : ''}
       <div class="mt-3">${blocks}</div>
     </div>`;
@@ -879,6 +896,7 @@ async function applyTailored() {
 function discardTailored() {
   state.tailored = null;
   state.tailoredDiff = [];
+  state._focusAreas = null;
   renderContent();
 }
 

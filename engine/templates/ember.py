@@ -135,7 +135,7 @@ class EmberTemplate(BaseTemplate):
                     y = PAGE_H - 20*mm
                     y = self._section(c, y, "Experience (continued)")
                 y = self._draw_exp(c, y, entry)
-                if i < len(exp)-1: y -= 10
+                if i < len(exp)-1: y -= 16
 
         self._footer(c, ct, self._pg)
 
@@ -166,13 +166,13 @@ class EmberTemplate(BaseTemplate):
             c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
             c.drawRightString(RE, y+1, self.s(role.get("period","")))
             y -= 13
-        y -= 3
+        y -= 1
         bst = self.make_style("b", "Poppins-Regular", 7.5, SLATE, leading=11)
         for b in bullets:
             txt = self.s(b.get("text","") if isinstance(b, dict) else str(b))
             if not txt: continue
             c.setFont("Poppins-Regular", 7.5); c.setFillColor(RUST)
-            c.drawString(ML, y-4, "\u2022")
+            c.drawString(ML, y-7, "\u2022")
             h = self.draw_wrapped(c, txt, bst, ML+10, y, CW-10)
             y -= h + 2.5
         return y
@@ -180,7 +180,7 @@ class EmberTemplate(BaseTemplate):
     def _measure_exp(self, entry):
         h = 12
         if entry.get("subtitle"): h += 12
-        h += len(entry.get("roles",[]))*13 + 3
+        h += len(entry.get("roles",[]))*13 + 1
         bst = self.make_style("m", "Poppins-Regular", 7.5, SLATE, leading=11)
         for b in entry.get("bullets",[]):
             txt = b.get("text","") if isinstance(b, dict) else str(b)
@@ -211,11 +211,12 @@ class EmberTemplate(BaseTemplate):
             if per:
                 c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
                 c.drawRightString(ML+lw, y+1, per)
-            y -= 13
+            y -= 12
             desc = self.s(v.get("description",""))
             if desc:
                 st = self.make_style("vd", "Poppins-Regular", 7, SLATE, leading=9.8)
-                h = self.draw_wrapped(c, desc, st, ML, y, lw); y -= h + 8
+                h = self.draw_wrapped(c, desc, st, ML, y, lw); y -= h
+            y -= 14
 
         edu = ct.get("education",[])
         if edu:
@@ -236,7 +237,10 @@ class EmberTemplate(BaseTemplate):
                 elif per:
                     c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
                     c.drawString(ML, y, per); y -= 11
-                for d in e.get("details",[]):
+                details = e.get("details", [])
+                if isinstance(details, str):
+                    details = [details] if details else []
+                for d in details:
                     st = self.make_style("ed", "Poppins-Regular", 6.5, DIM, leading=9)
                     h = self.draw_wrapped(c, d, st, ML+6, y, lw-6); y -= h + 2
                 y -= 8
@@ -256,7 +260,9 @@ class EmberTemplate(BaseTemplate):
                 desc = self.s(proj.get("description",""))
                 if desc:
                     st = self.make_style("pd", "Poppins-Regular", 6.5, DIM, leading=9)
-                    h = self.draw_wrapped(c, desc, st, ML, y, lw); y -= h + 4
+                    h = self.draw_wrapped(c, desc, st, ML, y, lw); y -= h + 12
+                else:
+                    y -= 10
 
         notable = ct.get("notable",[])
         if notable:
@@ -389,13 +395,13 @@ ul.bullets li { font-size: 10px; line-height: 1.55; color: var(--slate); padding
 ul.bullets li::before { content: '\\2022'; color: var(--rust); position: absolute; left: 0; font-size: 10px; }
 .two-col { display: grid; grid-template-columns: 56% 1fr; gap: 28px; padding: 0 68px; }
 .col-left section, .col-right section { padding: 0; margin-bottom: 20px; }
-.venture, .edu-entry { margin-bottom: 10px; }
+.venture, .edu-entry { margin-bottom: 16px; }
 .venture-header, .edu-header { display: flex; justify-content: space-between; align-items: baseline; }
 .venture p, .edu-detail { font-size: 9.5px; color: var(--slate); line-height: 1.5; margin-top: 2px; }
 .degree { font-size: 10px; color: var(--slate); margin-top: 1px; }
 .notable-item { font-size: 10px; line-height: 1.5; padding-left: 16px; position: relative; margin-bottom: 4px; }
 .notable-item::before { content: '\\25c6'; color: var(--rust); position: absolute; left: 0; font-size: 6px; top: 3px; }
-.project { margin-bottom: 8px; }
+.project { margin-bottom: 14px; }
 .project strong, .project-link { font-size: 10px; color: var(--ink); font-weight: 600; }
 .project-link { text-decoration: none; border-bottom: 1px solid var(--rule); }
 .project-link:hover { color: var(--rust); border-color: var(--rust); }

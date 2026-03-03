@@ -160,10 +160,12 @@ def tailor_cv(req: TailorRequest):
         raise HTTPException(500, f"Tailoring failed: {e}")
 
     diff = _compute_diff(master, tailored)
+    focus_areas = _extract_focus_areas(jd_text, req.emphasis, req.role, req.company)
 
     return {
         "tailored": tailored,
         "diff": diff,
+        "focus_areas": focus_areas,
         "jd_preview": jd_text[:500] if jd_text else "",
         "url_warning": url_warning,
     }
@@ -240,6 +242,54 @@ def _fetch_url_text(url: str) -> str:
     extractor.feed(html)
     text = " ".join(extractor.texts)
     return text[:10000]
+
+
+def _extract_focus_areas(jd_text: str, emphasis: list, role: str, company: str) -> list:
+    """Extract key focus areas and interview tips from JD and target info."""
+    import re
+    from collections import Counter
+
+    areas = []
+
+    # Emphasis keywords are explicit focus areas
+    for e in emphasis:
+        if e.strip():
+            areas.append({"type": "keyword", "text": e.strip()})
+
+    # Extract high-frequency meaningful words from JD
+    if jd_text:
+        words = re.findall(r"[a-zA-Z]{4,}", jd_text.lower())
+        stopwords = {
+            "that", "this", "with", "from", "your", "will", "have", "been",
+            "their", "they", "also", "about", "more", "into", "over", "such",
+            "both", "each", "some", "what", "when", "which", "where", "than",
+            "then", "them", "these", "those", "very", "just", "only", "must",
+            "role", "work", "team", "help", "able", "make", "well", "good",
+            "looking", "experience", "ability", "skills", "company",
+        }
+        freq = Counter(w for w in words if w not in stopwords)
+        top_jd = [w for w, _ in freq.most_common(10) if _ >= 2]
+        for w in top_jd[:6]:
+            # Don't duplicate emphasis keywords
+            if not any(w.lower() in a["text"].lower() for a in areas):
+                areas.append({"type": "jd_theme", "text": w})
+
+    # Build actionable suggestions
+    suggestions = []
+    if role:
+        suggestions.append(f"Lead with experience most relevant to the {role} role.")
+    if company:
+        suggestions.append(f"Research {company}'s products and recent news for the interview.")
+    if emphasis:
+        suggestions.append(f"Be ready to give concrete examples of: {', '.join(emphasis[:3])}.")
+    if jd_text and len(jd_text) > 200:
+        suggestions.append("Review the job description for specific tools and methodologies mentioned.")
+
+    return {
+        "keywords": [a["text"] for a in areas if a["type"] == "keyword"],
+        "themes": [a["text"] for a in areas if a["type"] == "jd_theme"],
+        "suggestions": suggestions,
+    }
 
 
 def _compute_diff(master: dict, tailored: dict) -> list:

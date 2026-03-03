@@ -470,6 +470,39 @@ textarea { resize: vertical; min-height: 90px; }
   line-height: 1.5;
 }
 
+/* ── Focus areas panel ───────────────────────────────────────────────────── */
+.focus-panel {
+  background: #f0f7ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.focus-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.focus-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.focus-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+.focus-tag-kw { background: #dbeafe; color: #1e40af; }
+.focus-tag-th { background: #ede9fe; color: #5b21b6; }
+.focus-suggestions {
+  list-style: disc;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
 /* ── Settings / API key ──────────────────────────────────────────────────── */
 .api-key-status {
   display: inline-flex;

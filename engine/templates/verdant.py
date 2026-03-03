@@ -150,7 +150,7 @@ class VerdantTemplate(BaseTemplate):
                     y = self._section(c, y, "Experience (continued)")
                 y = self._draw_exp(c, y, entry)
                 if i < len(exp) - 1:
-                    y -= 10
+                    y -= 16
 
         self._footer(c, ct, self._pg)
 
@@ -185,7 +185,7 @@ class VerdantTemplate(BaseTemplate):
             c.drawRightString(RE, y + 1, self.s(role.get("period", "")))
             y -= 13
 
-        y -= 2
+        y -= 0
         bst = self.make_style("b", "Poppins-Regular", 7.5, BODY, leading=11)
         for b in bullets:
             txt = self.s(b.get("text", "") if isinstance(b, dict) else str(b))
@@ -193,14 +193,14 @@ class VerdantTemplate(BaseTemplate):
                 continue
             # Small green dot bullet - aligned with first line
             c.setFillColor(GREEN_L)
-            c.circle(ML + 3, y - 5, 1.5, fill=1, stroke=0)
+            c.circle(ML + 3, y - 7, 1.5, fill=1, stroke=0)
             h = self.draw_wrapped(c, txt, bst, ML + 12, y, CW - 12)
             y -= h + 2.5
         return y
 
     def _measure_exp(self, entry):
         h = 12 + (11 if entry.get("subtitle") else 0)
-        h += len(entry.get("roles", [])) * 13 + 2
+        h += len(entry.get("roles", [])) * 13 + 0
         bst = self.make_style("m", "Poppins-Regular", 7.5, BODY, leading=11)
         for b in entry.get("bullets", []):
             txt = b.get("text", "") if isinstance(b, dict) else str(b)
@@ -241,7 +241,8 @@ class VerdantTemplate(BaseTemplate):
                 if desc:
                     st = self.make_style("vd", "Poppins-Regular", 7, BODY, leading=10)
                     h = self.draw_wrapped(c, desc, st, ML, ly, lw)
-                    ly -= h + 8
+                    ly -= h
+                ly -= 14
 
         edu = ct.get("education", [])
         if edu:
@@ -263,7 +264,10 @@ class VerdantTemplate(BaseTemplate):
                 elif per:
                     c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
                     c.drawString(ML, ly, per); ly -= 11
-                for d in e.get("details", []):
+                details = e.get("details", [])
+                if isinstance(details, str):
+                    details = [details] if details else []
+                for d in details:
                     st = self.make_style("ed", "Poppins-Regular", 6.5, GREY, leading=9)
                     h = self.draw_wrapped(c, d, st, ML + 4, ly, lw - 4)
                     ly -= h + 2
@@ -286,7 +290,9 @@ class VerdantTemplate(BaseTemplate):
                 if desc:
                     st = self.make_style("pd", "Poppins-Regular", 6.5, GREY, leading=9)
                     h = self.draw_wrapped(c, desc, st, ML, ly, lw)
-                    ly -= h + 10
+                    ly -= h + 12
+                else:
+                    ly -= 10
 
         notable = ct.get("notable", [])
         if notable:
@@ -428,14 +434,14 @@ ul.bullets li::before { content: ''; width: 5px; height: 5px; background: var(--
   position: absolute; left: 2px; top: 8px; }
 .two-col { display: grid; grid-template-columns: 55% 1fr; gap: 28px; padding: 0 68px; }
 .col-left section, .col-right section { padding: 0; margin-bottom: 20px; }
-.venture, .edu-entry { margin-bottom: 10px; }
+.venture, .edu-entry { margin-bottom: 16px; }
 .venture-header, .edu-header { display: flex; justify-content: space-between; align-items: baseline; }
 .venture p, .edu-detail { font-size: 9.5px; line-height: 1.5; margin-top: 2px; }
 .degree { font-size: 10px; margin-top: 1px; }
 .notable-item { font-size: 10px; line-height: 1.55; padding-left: 16px; position: relative; margin-bottom: 5px; }
 .notable-item::before { content: ''; width: 5px; height: 5px; background: var(--green-l); border-radius: 50%;
   position: absolute; left: 2px; top: 7px; }
-.project { margin-bottom: 8px; }
+.project { margin-bottom: 14px; }
 .project strong, .project-link { font-size: 10px; color: var(--near-blk); font-weight: 600; }
 .project-link { text-decoration: none; border-bottom: 1px solid var(--gold-lt); }
 .project-link:hover { color: var(--green); border-color: var(--green); }
