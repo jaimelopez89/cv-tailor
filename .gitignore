@@ -1,0 +1,25 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Data — keep structure but not personal content or secrets
+data/settings.yaml
+data/output/
+data/targets/
+data/master_profile.yaml
+
+# Keep data dir itself
+!data/.gitkeep
+
+# Fonts (auto-downloaded on first run)
+fonts/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

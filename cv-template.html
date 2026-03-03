@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CV Template</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+      background: #d0cec9;
+      color: #2a2a2a;
+      font-size: 13px;
+    }
+
+    /* ── Edit mode toolbar ── */
+    #toolbar {
+      position: fixed;
+      top: 12px;
+      right: 16px;
+      z-index: 100;
+      display: flex;
+      gap: 8px;
+    }
+    #toolbar button {
+      background: #C87941;
+      color: white;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    #toolbar button:hover { background: #a8612e; }
+    #toolbar button.secondary {
+      background: #555;
+    }
+    #toolbar button.secondary:hover { background: #333; }
+
+    /* ── Page shell ── */
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      background: white;
+      margin: 28px auto;
+      display: flex;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    }
+
+    /* ── Left sidebar ── */
+    .sidebar {
+      width: 32%;
+      background: #F2F0ED;
+      padding: 32px 22px 32px 22px;
+      flex-shrink: 0;
+    }
+
+    .photo-wrap {
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      overflow: hidden;
+      margin-bottom: 28px;
+      background: #ddd;
+      cursor: pointer;
+      position: relative;
+    }
+    .photo-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .photo-wrap .photo-hint {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(200,121,65,0.12);
+      font-size: 10px;
+      color: #C87941;
+      text-align: center;
+      line-height: 1.3;
+      padding: 8px;
+    }
+    #photo-input { display: none; }
+
+    .sb-section { margin-bottom: 26px; }
+
+    .sb-section h2 {
+      color: #C87941;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      letter-spacing: 0.01em;
+    }
+
+    .detail-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #555;
+      margin-top: 8px;
+      text-transform: none;
+    }
+    .detail-label:first-child { margin-top: 0; }
+
+    .detail-value {
+      font-size: 12px;
+      color: #333;
+      line-height: 1.5;
+    }
+
+    .skill-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .skill-list li {
+      font-size: 12px;
+      color: #333;
+      line-height: 1.5;
+    }
+
+    /* ── Main content ── */
+    .main {
+      width: 68%;
+      padding: 32px 32px 32px 28px;
+    }
+
+    .name-block {
+      margin-bottom: 24px;
+    }
+    .cv-name {
+      font-size: 26px;
+      font-weight: 700;
+      color: #1a1a1a;
+      line-height: 1.2;
+      margin-bottom: 4px;
+    }
+    .cv-role {
+      font-size: 13px;
+      color: #777;
+      font-weight: 400;
+    }
+
+    .section { margin-bottom: 24px; }
+
+    .section h2 {
+      color: #C87941;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      letter-spacing: 0.01em;
+    }
+
+    .profile-text {
+      font-size: 12px;
+      color: #444;
+      line-height: 1.65;
+    }
+
+    /* ── Job entries ── */
+    .job { margin-bottom: 20px; position: relative; }
+
+    .job-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1a1a1a;
+    }
+
+    .job-meta {
+      font-size: 11px;
+      color: #888;
+      margin: 3px 0 7px;
+    }
+    .job-meta .sep { margin: 0 6px; }
+    .job-meta .loc::before {
+      content: "📍";
+      font-size: 10px;
+      margin-right: 3px;
+    }
+
+    .job-company-note {
+      font-size: 12px;
+      color: #555;
+      font-style: italic;
+      margin-bottom: 5px;
+      line-height: 1.5;
+    }
+
+    .job-desc {
+      font-size: 12px;
+      color: #444;
+      line-height: 1.65;
+    }
+
+    .job-divider {
+      border: none;
+      border-top: 1px solid #e8e4e0;
+      margin-bottom: 20px;
+    }
+
+    /* ── Add/remove buttons (edit mode only) ── */
+    .add-btn {
+      display: none;
+      background: none;
+      border: 1px dashed #C87941;
+      color: #C87941;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: inherit;
+      margin-top: 6px;
+    }
+    .add-btn:hover { background: #fdf1e8; }
+
+    .remove-btn {
+      display: none;
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: none;
+      border: none;
+      color: #bbb;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px 4px;
+    }
+    .remove-btn:hover { color: #c0392b; }
+
+    body.edit-mode .add-btn { display: inline-block; }
+    body.edit-mode .remove-btn { display: block; }
+
+    /* ── Contenteditable highlighting ── */
+    body.edit-mode [contenteditable="true"] {
+      border-radius: 3px;
+      outline: none;
+      transition: background 0.15s;
+    }
+    body.edit-mode [contenteditable="true"]:hover {
+      background: rgba(200,121,65,0.07);
+    }
+    body.edit-mode [contenteditable="true"]:focus {
+      background: rgba(200,121,65,0.11);
+      box-shadow: 0 0 0 2px rgba(200,121,65,0.35);
+    }
+
+    /* ── Print ── */
+    @media print {
+      body { background: white; }
+      #toolbar { display: none; }
+      .page {
+        margin: 0;
+        box-shadow: none;
+        page-break-after: always;
+      }
+      .page:last-child { page-break-after: avoid; }
+      .add-btn, .remove-btn { display: none !important; }
+      [contenteditable] { outline: none !important; box-shadow: none !important; background: transparent !important; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button onclick="toggleEdit()" id="edit-btn">✏️ Edit Mode</button>
+  <button class="secondary" onclick="window.print()">🖨️ Print / Save PDF</button>
+</div>
+
+<input type="file" id="photo-input" accept="image/*" onchange="loadPhoto(event)">
+
+<!-- ═══════════════════════════════════════════════
+     PAGE 1
+════════════════════════════════════════════════ -->
+<div class="page" id="page1">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+
+    <div class="photo-wrap" onclick="document.getElementById('photo-input').click()" title="Click to change photo">
+      <img id="cv-photo" src="" alt="" onerror="this.style.display='none'">
+      <div class="photo-hint" id="photo-hint">Click to<br>add photo</div>
+    </div>
+
+    <!-- Details -->
+    <div class="sb-section">
+      <h2>Details</h2>
+      <div class="detail-label">Phone</div>
+      <div class="detail-value" contenteditable="true">+358453502277</div>
+      <div class="detail-label">Email</div>
+      <div class="detail-value" contenteditable="true">jaime@lopez.fi</div>
+    </div>
+
+    <!-- Skills -->
+    <div class="sb-section">
+      <h2>Skills</h2>
+      <ul class="skill-list" id="skills-list">
+        <li contenteditable="true">Marketing Leadership</li>
+        <li contenteditable="true">Marketing Operations</li>
+        <li contenteditable="true">Machine Learning</li>
+        <li contenteditable="true">Marketing Analytics</li>
+        <li contenteditable="true">Data Science</li>
+        <li contenteditable="true">Artificial Intelligence</li>
+        <li contenteditable="true">Salesforce Marketing Cloud</li>
+        <li contenteditable="true">MATLAB</li>
+        <li contenteditable="true">Energy Market</li>
+        <li contenteditable="true">Python</li>
+        <li contenteditable="true">Hubspot</li>
+      </ul>
+      <button class="add-btn" onclick="addListItem('skills-list')">+ Add skill</button>
+    </div>
+
+    <!-- Languages -->
+    <div class="sb-section">
+      <h2>Languages</h2>
+      <ul class="skill-list" id="languages-list">
+        <li contenteditable="true">English</li>
+        <li contenteditable="true">Galician</li>
+        <li contenteditable="true">Spanish</li>
+        <li contenteditable="true">Finnish</li>
+        <li contenteditable="true">French</li>
+        <li contenteditable="true">Portuguese</li>
+      </ul>
+      <button class="add-btn" onclick="addListItem('languages-list')">+ Add language</button>
+    </div>
+
+  </div><!-- /sidebar -->
+
+  <!-- MAIN -->
+  <div class="main">
+
+    <div class="name-block">
+      <div class="cv-name" contenteditable="true">Jaime López</div>
+      <div class="cv-role" contenteditable="true">Chief Marketing Officer</div>
+    </div>
+
+    <!-- Profile -->
+    <div class="section">
+      <h2>Profile</h2>
+      <div class="profile-text" contenteditable="true">An experienced marketing leader with a strong background in Marketing Operations and a track record of over a decade of success leading and growing in-house teams at leading B2B and SaaS companies. I have a strong focus on scaling marketing delivery to support ambitious growth targets. I am both an accomplished leader and a capable doer: my teams achieve targets while staying healthy; and I am considered a top expert in data-driven marketing who does not shy away from operations work.</div>
+    </div>
+
+    <!-- Employment History -->
+    <div class="section">
+      <h2>Employment History</h2>
+      <div id="jobs-list">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">Head of Marketing, Ververica GmbH</div>
+          <div class="job-meta">
+            <span contenteditable="true">Sept 2024 — Present</span>
+            <span class="sep">•</span>
+            <span class="loc" contenteditable="true">Remote (Helsinki)</span>
+          </div>
+          <div class="job-desc" contenteditable="true">Leading all Marketing activities globally. Managing a global team of professionals to develop and execute marketing campaigns that position Ververica as a leading player in the real-time stream processing space. Responsible for multi-million euro budgets and pipeline targets. Launched multiple products.</div>
+        </div>
+
+        <hr class="job-divider">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">Senior Director, Marketing Operations, Aiven</div>
+          <div class="job-meta">
+            <span contenteditable="true">Apr 2022 — Sept. 2024</span>
+            <span class="sep">•</span>
+            <span class="loc" contenteditable="true">Helsinki</span>
+          </div>
+          <div class="job-company-note" contenteditable="true">Aiven is the leading cloud data platform provider, valued at over $3bn after its Round D.</div>
+          <div class="job-desc" contenteditable="true">Leading Marketing Operations teams at Aiven, including Martech, Web, Design and Analytics. Strategic work defining go-to-market motions, target personas and quantified value propositions. Complete rebuild of the marketing & sales technology stack and processes according to industry best practices. Strong focus on values and team wellbeing, resulting in the highest employee NPS in the company.</div>
+        </div>
+
+        <hr class="job-divider">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">Director, Content &amp; Marketing Operations, Aiven</div>
+          <div class="job-meta">
+            <span contenteditable="true">Sept 2021 — Apr 2022</span>
+          </div>
+          <div class="job-desc" contenteditable="true">Received early promotion due to outstanding performance.</div>
+        </div>
+
+        <hr class="job-divider">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">General Manager, Marketing Operations and Digital Acceleration, Marine Business, Wärtsilä</div>
+          <div class="job-meta">
+            <span contenteditable="true">Jan 2019 — Sept 2021</span>
+            <span class="sep">•</span>
+            <span class="loc" contenteditable="true">Helsinki</span>
+          </div>
+          <div class="job-desc" contenteditable="true">Increased marketing-impacted pipeline from EUR 500M to EUR 1.5bn and impact from 3.6% to 10.3%. Developed a Machine Learning-powered attribution model that calculates the impact of measurable marketing on sales uplift and profit uplift.</div>
+        </div>
+
+      </div><!-- /jobs-list -->
+      <button class="add-btn" onclick="addJob()">+ Add job</button>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /page1 -->
+
+
+<!-- ═══════════════════════════════════════════════
+     PAGE 2
+════════════════════════════════════════════════ -->
+<div class="page" id="page2">
+
+  <!-- SIDEBAR (empty, keeps layout) -->
+  <div class="sidebar" style="background: #F2F0ED;"></div>
+
+  <!-- MAIN -->
+  <div class="main">
+
+    <!-- Employment continued -->
+    <div class="section">
+      <div id="jobs-list-2">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">Marketing Automation Manager, Wärtsilä</div>
+          <div class="job-meta">
+            <span contenteditable="true">Feb 2017 — Jan 2019</span>
+            <span class="sep">•</span>
+            <span class="loc" contenteditable="true">Helsinki</span>
+          </div>
+          <div class="job-desc" contenteditable="true">Ownership of the corporate Marketing Automation platform and strategy. Development of marketing and CRM practices company-wide. Creation of the first marketing impact and ROI statistical model in Wärtsilä.</div>
+        </div>
+
+        <hr class="job-divider">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">Head of Marketing, Sharper Shape</div>
+          <div class="job-meta">
+            <span contenteditable="true">Jul 2016 — Feb 2017</span>
+            <span class="sep">•</span>
+            <span class="loc" contenteditable="true">Helsinki</span>
+          </div>
+          <div class="job-company-note" contenteditable="true">Sharper Shape is the global leader in drone-based automated inspection.</div>
+          <div class="job-desc" contenteditable="true">Full responsibility over marketing operations. Design and implementation of a fully-automated sales & marketing technology stack, from the ground up. Focus on business development and investor outreach in Silicon Valley.</div>
+        </div>
+
+        <hr class="job-divider">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">Various roles in Marketing and Business development, Wärtsilä</div>
+          <div class="job-meta">
+            <span contenteditable="true">Jun 2013 — Jul 2016</span>
+            <span class="sep">•</span>
+            <span class="loc" contenteditable="true">Vaasa</span>
+          </div>
+          <div class="job-desc" contenteditable="true">Founded and scaled the data-driven marketing practice at Wärtsilä. Marketing strategy and value proposition creation for market development projects in energy markets like SPP (Texas) and post-energy reform Mexico. Creation and leadership of a marketing function for lead generation and nurturing, leading to EUR 330M in pipeline. Rovvie and Effie awards finalist.</div>
+        </div>
+
+      </div><!-- /jobs-list-2 -->
+      <button class="add-btn" onclick="addJob2()">+ Add job</button>
+    </div>
+
+    <!-- Education -->
+    <div class="section">
+      <h2>Education</h2>
+      <div id="edu-list">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">Massachusetts Institute of Technology, MicroMasters Program (MITx), Statistics and Data Science</div>
+          <div class="job-meta">
+            <span contenteditable="true">Feb 2021 — Dec 2023</span>
+            <span class="sep">•</span>
+            <span class="loc" contenteditable="true">Remote</span>
+          </div>
+        </div>
+
+        <hr class="job-divider">
+
+        <div class="job">
+          <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+          <div class="job-title" contenteditable="true">Technical University of Madrid, M.Sc. (Tech) in Energy Engineering</div>
+          <div class="job-meta">
+            <span contenteditable="true">Sept 2007 — Oct 2013</span>
+            <span class="sep">•</span>
+            <span class="loc" contenteditable="true">Madrid</span>
+          </div>
+          <div class="job-desc" contenteditable="true">Grade A</div>
+        </div>
+
+      </div><!-- /edu-list -->
+      <button class="add-btn" onclick="addEducation()">+ Add education</button>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /page2 -->
+
+<script>
+  let editMode = false;
+
+  function toggleEdit() {
+    editMode = !editMode;
+    document.body.classList.toggle('edit-mode', editMode);
+    document.getElementById('edit-btn').textContent = editMode ? '👁 View Mode' : '✏️ Edit Mode';
+
+    // Toggle contenteditable on all text elements
+    const els = document.querySelectorAll('.cv-name, .cv-role, .profile-text, .job-title, .job-meta span, .job-desc, .job-company-note, .detail-value, .skill-list li, .sb-section h2, .section h2');
+    els.forEach(el => {
+      el.contentEditable = editMode ? 'true' : 'false';
+    });
+  }
+
+  function loadPhoto(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = document.getElementById('cv-photo');
+      img.src = e.target.result;
+      img.style.display = 'block';
+      document.getElementById('photo-hint').style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function addListItem(listId) {
+    const list = document.getElementById(listId);
+    const li = document.createElement('li');
+    li.contentEditable = 'true';
+    li.textContent = 'New item';
+    list.appendChild(li);
+    li.focus();
+    selectAll(li);
+  }
+
+  function selectAll(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function makeJobHTML(title, dateRange, location, companyNote, desc) {
+    const job = document.createElement('div');
+    job.className = 'job';
+    job.innerHTML = `
+      <button class="remove-btn" onclick="removeJob(this)" title="Remove">×</button>
+      <div class="job-title" contenteditable="true">${title}</div>
+      <div class="job-meta">
+        <span contenteditable="true">${dateRange}</span>
+        ${location ? `<span class="sep">•</span><span class="loc" contenteditable="true">${location}</span>` : ''}
+      </div>
+      ${companyNote ? `<div class="job-company-note" contenteditable="true">${companyNote}</div>` : ''}
+      <div class="job-desc" contenteditable="true">${desc}</div>
+    `;
+    return job;
+  }
+
+  function addJob() {
+    const list = document.getElementById('jobs-list');
+    const hr = document.createElement('hr');
+    hr.className = 'job-divider';
+    list.appendChild(hr);
+    const job = makeJobHTML('Job Title, Company', 'Month YYYY — Month YYYY', 'City', '', 'Describe your responsibilities and achievements here.');
+    list.appendChild(job);
+    job.querySelector('.job-title').focus();
+    selectAll(job.querySelector('.job-title'));
+  }
+
+  function addJob2() {
+    const list = document.getElementById('jobs-list-2');
+    const hr = document.createElement('hr');
+    hr.className = 'job-divider';
+    list.appendChild(hr);
+    const job = makeJobHTML('Job Title, Company', 'Month YYYY — Month YYYY', 'City', '', 'Describe your responsibilities and achievements here.');
+    list.appendChild(job);
+    job.querySelector('.job-title').focus();
+    selectAll(job.querySelector('.job-title'));
+  }
+
+  function addEducation() {
+    const list = document.getElementById('edu-list');
+    const hr = document.createElement('hr');
+    hr.className = 'job-divider';
+    list.appendChild(hr);
+    const job = makeJobHTML('Degree, Institution', 'Month YYYY — Month YYYY', 'City', '', '');
+    list.appendChild(job);
+    job.querySelector('.job-title').focus();
+    selectAll(job.querySelector('.job-title'));
+  }
+
+  function removeJob(btn) {
+    const job = btn.closest('.job');
+    // Also remove preceding divider if present
+    const prev = job.previousElementSibling;
+    if (prev && prev.classList.contains('job-divider')) prev.remove();
+    job.remove();
+  }
+
+  // Start in view mode — contenteditable off by default
+  document.querySelectorAll('[contenteditable="true"]').forEach(el => {
+    el.contentEditable = 'false';
+  });
+</script>
+</body>
+</html>

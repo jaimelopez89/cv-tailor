@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CV Tailor</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────── -->
+  <nav id="sidebar">
+    <div class="sidebar-logo">
+      <h1>CV <span>Tailor</span></h1>
+      <p>Local CV editor &amp; tailoring</p>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Navigate</div>
+
+      <div class="sidebar-item" data-tab="edit" onclick="setTab('edit')">
+        <span class="icon">✏️</span>Edit CV
+      </div>
+      <div class="sidebar-item" data-tab="tailor" onclick="setTab('tailor')">
+        <span class="icon">✨</span>Tailor to Role
+      </div>
+      <div class="sidebar-item" data-tab="export" onclick="setTab('export')">
+        <span class="icon">📄</span>Export PDF
+      </div>
+      <div class="sidebar-item" data-tab="settings" onclick="setTab('settings')">
+        <span class="icon">⚙️</span>Settings
+      </div>
+    </div>
+
+    <div class="sidebar-section" id="section-nav-wrap" style="display:none">
+      <div class="sidebar-section-label">Sections</div>
+      <div id="sidebar-nav"></div>
+    </div>
+
+    <div class="sidebar-footer">
+      Press ⌘S / Ctrl+S to save
+    </div>
+  </nav>
+
+  <!-- ── Main ───────────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- Topbar -->
+    <div id="topbar">
+      <div class="topbar-title">CV Tailor</div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary btn-sm" onclick="loadProfile().then(renderContent)">↺ Reload</button>
+        <button class="btn btn-primary" id="save-btn" onclick="saveProfile()">💾 Save</button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div id="tabs">
+      <div class="tab active" data-tab="edit" onclick="setTab('edit')">✏️ Edit</div>
+      <div class="tab" data-tab="tailor" onclick="setTab('tailor')">✨ Tailor</div>
+      <div class="tab" data-tab="export" onclick="setTab('export')">📄 Export</div>
+      <div class="tab" data-tab="settings" onclick="setTab('settings')" style="margin-left:auto">⚙️ Settings</div>
+    </div>
+
+    <!-- Content -->
+    <div id="content">
+      <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <h3>Loading…</h3>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script src="/app.js"></script>
+<script>
+  const origSetTab = setTab;
+  window.setTab = function(tab) {
+    origSetTab(tab);
+    const wrap = document.getElementById('section-nav-wrap');
+    if (wrap) wrap.style.display = tab === 'edit' ? 'block' : 'none';
+    document.querySelectorAll('#sidebar .sidebar-item[data-tab]').forEach(el => {
+      el.classList.toggle('active', el.dataset.tab === tab);
+    });
+    document.querySelectorAll('#tabs .tab').forEach(el => {
+      el.classList.toggle('active', el.dataset.tab === tab);
+    });
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('section-nav-wrap').style.display = 'block';
+    document.querySelectorAll('#sidebar .sidebar-item[data-tab="edit"]').forEach(el => el.classList.add('active'));
+  });
+</script>
+</body>
+</html>

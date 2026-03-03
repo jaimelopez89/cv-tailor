@@ -1,0 +1,8 @@
+reportlab>=4.0
+PyYAML>=6.0
+requests>=2.31
+anthropic>=0.40
+fastapi>=0.110
+uvicorn>=0.27
+python-multipart>=0.0.9
+certifi>=2024.0
