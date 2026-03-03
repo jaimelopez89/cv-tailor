@@ -251,22 +251,19 @@ class VerdantTemplate(BaseTemplate):
             for e in edu:
                 c.setFont("Poppins-SemiBold", 9); c.setFillColor(NEAR_BLK)
                 c.drawString(ML, ly, self.s(e.get("school", "")))
+                per = self.s(e.get("period", ""))
+                if per:
+                    c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
+                    c.drawRightString(ML + lw, ly + 1, per)
                 ly -= 12
                 deg = self.s(e.get("degree", ""))
-                per = self.s(e.get("period", ""))
                 if deg:
                     c.setFont("Poppins-Regular", 7.5); c.setFillColor(BODY)
                     c.drawString(ML, ly, deg)
-                    if per:
-                        c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
-                        c.drawRightString(ML + lw, ly + 1, per)
                     ly -= 11
-                elif per:
-                    c.setFont("Poppins-Regular", 7); c.setFillColor(SOFT)
-                    c.drawString(ML, ly, per); ly -= 11
                 details = e.get("details", [])
                 if isinstance(details, str):
-                    details = [details] if details else []
+                    details = [x.strip() for x in details.split(";") if x.strip()]
                 for d in details:
                     st = self.make_style("ed", "Poppins-Regular", 6.5, GREY, leading=9)
                     h = self.draw_wrapped(c, d, st, ML + 4, ly, lw - 4)
@@ -435,7 +432,11 @@ ul.bullets li::before { content: ''; width: 5px; height: 5px; background: var(--
 .two-col { display: grid; grid-template-columns: 55% 1fr; gap: 28px; padding: 0 68px; }
 .col-left section, .col-right section { padding: 0; margin-bottom: 20px; }
 .venture, .edu-entry { margin-bottom: 16px; }
-.venture-header, .edu-header { display: flex; justify-content: space-between; align-items: baseline; }
+.venture-header { display: flex; justify-content: space-between; align-items: baseline; }
+.edu-school { display: block; font-weight: 600; font-size: 11px; color: var(--near-blk); margin-bottom: 2px; }
+.edu-degree-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.edu-degree-row .degree { flex: 1; min-width: 0; }
+.edu-degree-row .period { flex-shrink: 0; white-space: nowrap; }
 .venture p, .edu-detail { font-size: 9.5px; line-height: 1.5; margin-top: 2px; }
 .degree { font-size: 10px; margin-top: 1px; }
 .notable-item { font-size: 10px; line-height: 1.55; padding-left: 16px; position: relative; margin-bottom: 5px; }

@@ -270,7 +270,7 @@ class FolioTemplate(BaseTemplate):
                     c.drawRightString(ML + DATE_W, y + 1, per); y -= 11
                 details = e.get("details", [])
                 if isinstance(details, str):
-                    details = [details] if details else []
+                    details = [x.strip() for x in details.split(";") if x.strip()]
                 for d in details:
                     st = self.make_style("ed", "Poppins-Regular", 6.5, GREY, leading=9)
                     h = self.draw_wrapped(c, d, st, CONTENT_X + 4, y, CONTENT_W - 4)
@@ -410,7 +410,10 @@ class FolioTemplate(BaseTemplate):
         # Build education with date column
         edu_html = ""
         for e in ct.get("education", []):
-            details = "".join(f"<p class='edu-detail'>{self.h(d)}</p>" for d in e.get("details", []))
+            raw_det = e.get("details", [])
+            if isinstance(raw_det, str):
+                raw_det = [x.strip() for x in raw_det.split(";") if x.strip()]
+            details = "".join(f"<p class='edu-detail'>{self.h(d)}</p>" for d in raw_det)
             edu_html += f"""<div class="entry-row">
 <div class="date-col">{self.h(e.get("period", ""))}</div>
 <div class="content-col"><strong>{self.h(e.get("school", ""))}</strong><p class="degree">{self.h(e.get("degree", ""))}</p>{details}</div></div>\n"""

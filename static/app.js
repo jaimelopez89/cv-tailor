@@ -159,6 +159,7 @@ function renderSidebar() {
     { id: 'metrics',  icon: '📊', label: 'Metrics' },
     { id: 'speaking', icon: '🎤', label: 'Speaking' },
     { id: 'ventures', icon: '🚀', label: 'Ventures' },
+    { id: 'projects', icon: '🔧', label: 'Projects' },
   ];
 
   const nav = document.getElementById('sidebar-nav');
@@ -194,6 +195,7 @@ function renderEditTab() {
     case 'metrics':    return renderMetrics();
     case 'speaking':   return renderSpeaking();
     case 'ventures':   return renderVentures();
+    case 'projects':   return renderProjects();
     default:           return '<p>Select a section.</p>';
   }
 }
@@ -205,6 +207,21 @@ function attachEditListeners() {
 }
 
 // ── Personal Info ─────────────────────────────────────────────────────────
+function setMeta(field, val) {
+  state.profile.meta = state.profile.meta || {};
+  state.profile.meta[field] = val;
+  markDirty();
+}
+
+function setSummary(val) {
+  if (typeof state.profile.summary === 'object' && state.profile.summary !== null) {
+    state.profile.summary.default = val;
+  } else {
+    state.profile.summary = val;
+  }
+  markDirty();
+}
+
 function renderPersonal() {
   const m = state.profile?.meta || {};
   return `
@@ -212,13 +229,13 @@ function renderPersonal() {
       <div class="card-header"><h2>Personal Information</h2></div>
       <div class="card-body">
         <div class="form-grid">
-          <div class="form-group span-2"><label>Full Name</label><input id="f-name" type="text" value="${esc(m.name)}" placeholder="Your name"></div>
-          <div class="form-group span-2"><label>Current Role / Tagline</label><input id="f-tagline" type="text" value="${esc(m.tagline)}" placeholder="e.g. Chief Marketing Officer"></div>
-          <div class="form-group"><label>Email</label><input id="f-email" type="email" value="${esc(m.email)}" placeholder="you@example.com"></div>
-          <div class="form-group"><label>Phone</label><input id="f-phone" type="text" value="${esc(m.phone)}" placeholder="+1 555 000 0000"></div>
-          <div class="form-group"><label>Website</label><input id="f-web" type="text" value="${esc(m.web)}" placeholder="yoursite.com"></div>
-          <div class="form-group"><label>LinkedIn</label><input id="f-linkedin" type="text" value="${esc(m.linkedin)}" placeholder="linkedin.com/in/you"></div>
-          <div class="form-group span-2"><label>Location</label><input id="f-location" type="text" value="${esc(m.location)}" placeholder="City, Country"></div>
+          <div class="form-group span-2"><label>Full Name</label><input id="f-name" type="text" value="${esc(m.name)}" placeholder="Your name" oninput="setMeta('name',this.value)"></div>
+          <div class="form-group span-2"><label>Current Role / Tagline</label><input id="f-tagline" type="text" value="${esc(m.tagline)}" placeholder="e.g. Chief Marketing Officer" oninput="setMeta('tagline',this.value)"></div>
+          <div class="form-group"><label>Email</label><input id="f-email" type="email" value="${esc(m.email)}" placeholder="you@example.com" oninput="setMeta('email',this.value)"></div>
+          <div class="form-group"><label>Phone</label><input id="f-phone" type="text" value="${esc(m.phone)}" placeholder="+1 555 000 0000" oninput="setMeta('phone',this.value)"></div>
+          <div class="form-group"><label>Website</label><input id="f-web" type="text" value="${esc(m.web)}" placeholder="yoursite.com" oninput="setMeta('web',this.value)"></div>
+          <div class="form-group"><label>LinkedIn</label><input id="f-linkedin" type="text" value="${esc(m.linkedin)}" placeholder="linkedin.com/in/you" oninput="setMeta('linkedin',this.value)"></div>
+          <div class="form-group span-2"><label>Location</label><input id="f-location" type="text" value="${esc(m.location)}" placeholder="City, Country" oninput="setMeta('location',this.value)"></div>
         </div>
       </div>
     </div>`;
@@ -234,7 +251,7 @@ function renderSummary() {
       <div class="card-body">
         <div class="form-group">
           <label>Summary Text</label>
-          <textarea id="f-summary" rows="6" placeholder="A compelling overview of your background and value...">${esc(text)}</textarea>
+          <textarea id="f-summary" rows="6" placeholder="A compelling overview of your background and value..." oninput="setSummary(this.value)">${esc(text)}</textarea>
         </div>
         <p class="text-sm text-muted mt-2">This is your default summary. AI tailoring may select or adjust it per role.</p>
       </div>
@@ -648,6 +665,37 @@ function updateVenture(i, field, val) {
     state.profile.ventures[i] = { name: state.profile.ventures[i] };
   }
   state.profile.ventures[i][field] = val;
+}
+
+// ── Projects ──────────────────────────────────────────────────────────────
+function renderProjects() {
+  const projects = state.profile?.projects || [];
+  return `
+    <div class="flex-between mb-2">
+      <h2 style="font-size:15px;font-weight:600;">Other Projects</h2>
+      <button class="btn btn-primary btn-sm" onclick="addProject()">+ Add</button>
+    </div>
+    ${projects.map((p, i) => `
+      <div class="card mb-2">
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="form-group span-2"><label>Project Name</label><input type="text" value="${esc(p.name||'')}" oninput="state.profile.projects[${i}].name=this.value;markDirty()"></div>
+            <div class="form-group span-2"><label>URL (without https://)</label><input type="text" value="${esc(p.url||'')}" placeholder="github.com/user/repo" oninput="state.profile.projects[${i}].url=this.value;markDirty()"></div>
+            <div class="form-group span-2"><label>Description</label><textarea rows="2" oninput="state.profile.projects[${i}].description=this.value;markDirty()">${esc(p.description||'')}</textarea></div>
+          </div>
+          <div class="mt-2 flex" style="justify-content:flex-end">
+            <button class="btn btn-danger btn-sm" onclick="state.profile.projects.splice(${i},1);markDirty();renderContent()">Remove</button>
+          </div>
+        </div>
+      </div>`).join('')}
+    ${projects.length === 0 ? emptyState('🔧', 'No projects yet', '') : ''}`;
+}
+
+function addProject() {
+  state.profile.projects = state.profile.projects || [];
+  state.profile.projects.push({ name: '', url: '', description: '' });
+  markDirty();
+  renderContent();
 }
 
 // ── Tailor tab ────────────────────────────────────────────────────────────

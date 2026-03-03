@@ -224,22 +224,19 @@ class EmberTemplate(BaseTemplate):
             for e in edu:
                 c.setFont("Poppins-SemiBold", 9.5); c.setFillColor(INK)
                 c.drawString(ML, y, self.s(e.get("school","")))
+                per = self.s(e.get("period",""))
+                if per:
+                    c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
+                    c.drawRightString(ML+lw, y+1, per)
                 y -= 13
                 deg = self.s(e.get("degree",""))
-                per = self.s(e.get("period",""))
                 if deg:
                     c.setFont("Poppins-Regular", 7.5); c.setFillColor(SLATE)
                     c.drawString(ML, y, deg)
-                    if per:
-                        c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
-                        c.drawRightString(ML+lw, y+1, per)
                     y -= 11
-                elif per:
-                    c.setFont("SourceCodePro-Regular", 6.5); c.setFillColor(LIGHT)
-                    c.drawString(ML, y, per); y -= 11
                 details = e.get("details", [])
                 if isinstance(details, str):
-                    details = [details] if details else []
+                    details = [x.strip() for x in details.split(";") if x.strip()]
                 for d in details:
                     st = self.make_style("ed", "Poppins-Regular", 6.5, DIM, leading=9)
                     h = self.draw_wrapped(c, d, st, ML+6, y, lw-6); y -= h + 2
@@ -396,8 +393,12 @@ ul.bullets li::before { content: '\\2022'; color: var(--rust); position: absolut
 .two-col { display: grid; grid-template-columns: 56% 1fr; gap: 28px; padding: 0 68px; }
 .col-left section, .col-right section { padding: 0; margin-bottom: 20px; }
 .venture, .edu-entry { margin-bottom: 16px; }
-.venture-header, .edu-header { display: flex; justify-content: space-between; align-items: baseline; }
+.venture-header { display: flex; justify-content: space-between; align-items: baseline; }
 .venture p, .edu-detail { font-size: 9.5px; color: var(--slate); line-height: 1.5; margin-top: 2px; }
+.edu-school { display: block; font-weight: 600; font-size: 12px; color: var(--ink); margin-bottom: 2px; }
+.edu-degree-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.edu-degree-row .degree { flex: 1; min-width: 0; }
+.edu-degree-row .period { flex-shrink: 0; white-space: nowrap; }
 .degree { font-size: 10px; color: var(--slate); margin-top: 1px; }
 .notable-item { font-size: 10px; line-height: 1.5; padding-left: 16px; position: relative; margin-bottom: 4px; }
 .notable-item::before { content: '\\25c6'; color: var(--rust); position: absolute; left: 0; font-size: 6px; top: 3px; }
