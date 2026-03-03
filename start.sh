@@ -13,8 +13,8 @@ fi
 echo ""
 echo "  CV Tailor"
 echo "  ─────────────────────────────────────"
-echo "  Open in browser: http://localhost:8080"
+echo "  Open in browser: http://localhost:8090"
 echo "  Stop with:       Ctrl+C"
 echo ""
 
-uvicorn app:app --reload --port 8080 --host 127.0.0.1
+uvicorn app:app --reload --port 8090 --host 127.0.0.1
