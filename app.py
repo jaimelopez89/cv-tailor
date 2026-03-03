@@ -131,15 +131,17 @@ _apply_settings()
 @app.post("/api/tailor")
 def tailor_cv(req: TailorRequest):
     if not MASTER_PROFILE.exists():
-        raise HTTPException(400, "No master profile. Fill in your CV first.")
+        raise HTTPException(400, "No master profile found. Go to Edit and save your CV first.")
 
     jd_text = req.jd_text
+    url_warning = None
 
     if req.url:
         try:
             jd_text = _fetch_url_text(req.url)
         except Exception as e:
-            raise HTTPException(400, f"Could not fetch URL: {e}")
+            # Don't hard-fail — warn and continue with keywords/JD text only
+            url_warning = f"Could not fetch URL: {e}. Tailoring with keywords only."
 
     target = {
         "role": req.role,
@@ -151,12 +153,20 @@ def tailor_cv(req: TailorRequest):
     with open(MASTER_PROFILE) as f:
         master = yaml.safe_load(f) or {}
 
-    from engine.tailor import tailor
-    tailored = tailor(str(MASTER_PROFILE), target, ai=req.use_ai, rewrite=req.rewrite)
+    try:
+        from engine.tailor import tailor
+        tailored = tailor(str(MASTER_PROFILE), target, ai=req.use_ai, rewrite=req.rewrite)
+    except Exception as e:
+        raise HTTPException(500, f"Tailoring failed: {e}")
 
     diff = _compute_diff(master, tailored)
 
-    return {"tailored": tailored, "diff": diff, "jd_preview": jd_text[:500] if jd_text else ""}
+    return {
+        "tailored": tailored,
+        "diff": diff,
+        "jd_preview": jd_text[:500] if jd_text else "",
+        "url_warning": url_warning,
+    }
 
 
 # ── Export ────────────────────────────────────────────────────────────────────

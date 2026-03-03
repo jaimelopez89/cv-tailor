@@ -751,10 +751,22 @@ async function runTailor() {
     state.tailored = res.tailored;
     state.tailoredDiff = res.diff;
     state._jdPreview = res.jd_preview;
+    state._urlWarning = res.url_warning || null;
     renderContent();
-    toast(`Tailored! ${res.diff.length} section(s) changed.`, 'success');
+    if (res.url_warning) {
+      toast(`⚠️ ${res.url_warning}`, '');
+    } else {
+      toast(`Tailored! ${res.diff.length} section(s) changed.`, 'success');
+    }
   } catch (e) {
     toast(e.message, 'error');
+    // Also show inline so it's impossible to miss
+    const content = document.getElementById('content');
+    const banner = document.createElement('div');
+    banner.style.cssText = 'background:#fee2e2;border:1px solid #fca5a5;color:#7f1d1d;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;';
+    banner.innerHTML = `<strong>Error:</strong> ${e.message}`;
+    content.prepend(banner);
+    setTimeout(() => banner.remove(), 8000);
   } finally {
     btn.disabled = false;
     btn.innerHTML = '✨ Tailor CV';
@@ -833,6 +845,7 @@ function renderDiff() {
           <button class="btn btn-primary" onclick="applyTailored()">Apply &amp; Save Tailored CV →</button>
         </div>
       </div>
+      ${state._urlWarning ? `<div style="background:#fef3c7;border:1px solid #fcd34d;color:#92400e;padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:10px;">⚠️ ${esc(state._urlWarning)}</div>` : ''}
       ${state._jdPreview ? `<div class="jd-preview"><strong>JD preview:</strong> ${esc(state._jdPreview)}…</div>` : ''}
       <div class="mt-3">${blocks}</div>
     </div>`;

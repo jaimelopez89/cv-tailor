@@ -82,7 +82,7 @@ SAMPLE_PROFILE = {
 
 @pytest.fixture(autouse=True)
 def isolated_data_dir(tmp_path, monkeypatch):
-    """Each test gets its own data directory."""
+    """Each test gets its own data directory with all path vars patched."""
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     output_dir = data_dir / "output"
@@ -92,6 +92,7 @@ def isolated_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "DATA_DIR", data_dir)
     monkeypatch.setattr(app_module, "MASTER_PROFILE", data_dir / "master_profile.yaml")
     monkeypatch.setattr(app_module, "OUTPUT_DIR", output_dir)
+    monkeypatch.setattr(app_module, "SETTINGS_FILE", data_dir / "settings.yaml")
     return data_dir
 
 
@@ -220,6 +221,19 @@ class TestTailor:
             "role": "CMO", "jd_text": "marketing leadership pipeline growth", "use_ai": False
         })
         assert "jd_preview" in res.json()
+
+    def test_bad_url_returns_warning_not_error(self, client_with_profile):
+        """URL fetch failure must not kill the tailor — it should warn and continue."""
+        res = client_with_profile.post("/api/tailor", json={
+            "role": "CMO",
+            "url": "http://localhost:19999/nonexistent",
+            "use_ai": False,
+        })
+        assert res.status_code == 200, "Bad URL should not return 400"
+        data = res.json()
+        assert "tailored" in data
+        assert data["url_warning"] is not None
+        assert "Could not fetch URL" in data["url_warning"]
 
     def test_tailor_does_not_modify_master(self, client_with_profile, isolated_data_dir):
         original_mtime = os.path.getmtime(isolated_data_dir / "master_profile.yaml")
