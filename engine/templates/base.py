@@ -144,6 +144,8 @@ class BaseTemplate:
             return ""
         items = ""
         for m in metrics[:4]:
+            if not isinstance(m, dict):
+                continue
             v = self.h(m.get("value", ""))
             l = self.h(m.get("label", ""))
             items += f'<div class="metric"><span class="metric-value">{v}</span><span class="metric-label">{l}</span></div>\n'
@@ -155,6 +157,8 @@ class BaseTemplate:
             return ""
         entries = ""
         for entry in experience:
+            if not isinstance(entry, dict):
+                continue
             if entry.get("_hidden"):
                 continue
             company = self.h(entry.get("company", ""))
@@ -192,6 +196,8 @@ class BaseTemplate:
             return ""
         items = ""
         for v in ventures:
+            if not isinstance(v, dict):
+                continue
             if v.get("_hidden"):
                 continue
             name = self.h(v.get("name", ""))
@@ -207,6 +213,8 @@ class BaseTemplate:
             return ""
         items = ""
         for e in education:
+            if not isinstance(e, dict):
+                continue
             school = self.h(e.get("school", ""))
             degree = self.h(e.get("degree", ""))
             period = self.h(e.get("period", ""))
@@ -224,6 +232,8 @@ class BaseTemplate:
         groups = skills.get("groups", []) if isinstance(skills, dict) else []
         items = ""
         for g in groups:
+            if not isinstance(g, dict):
+                continue
             if g.get("_hidden"):
                 continue
             name = self.h(g.get("name", ""))
