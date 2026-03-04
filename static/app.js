@@ -178,7 +178,10 @@ function renderContent() {
 
   switch (state.activeTab) {
     case 'edit':     el.innerHTML = renderEditTab(); attachEditListeners(); break;
-    case 'tailor':   el.innerHTML = renderTailorTab(); break;
+    case 'tailor':
+      el.innerHTML = renderTailorTab();
+      if (state.tailored) setTimeout(refreshPreview, 80);
+      break;
     case 'export':   el.innerHTML = renderExportTab(); break;
     case 'settings': el.innerHTML = renderSettingsTab(); break;
   }
@@ -703,59 +706,97 @@ function addProject() {
 // ── Tailor tab ────────────────────────────────────────────────────────────
 function renderTailorTab() {
   const hasTailored = !!state.tailored;
-  return `
-    <div class="tailor-panel">
-      <div class="card mb-4">
-        <div class="card-header"><h2>Tailor to a Position</h2></div>
-        <div class="card-body">
-          <div class="form-grid cols-1 mb-2">
-            <div class="form-group">
-              <label>Job Posting URL <span class="text-muted">(optional — paste the URL to auto-fetch the JD)</span></label>
-              <input type="url" id="t-url" value="${esc(state._lastUrl||'')}" placeholder="https://company.com/jobs/role">
-            </div>
-          </div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Role</label>
-              <input type="text" id="t-role" value="${esc(state._lastRole||'')}" placeholder="VP of Marketing">
-            </div>
-            <div class="form-group">
-              <label>Company</label>
-              <input type="text" id="t-company" value="${esc(state._lastCompany||'')}" placeholder="Acme Corp">
-            </div>
-            <div class="form-group span-2">
-              <label>Keywords / Emphasis <span class="text-muted">(comma-separated — optional)</span></label>
-              <input type="text" id="t-keywords" value="${esc(state._lastKeywords||'')}" placeholder="e.g. demand generation, ABM, pipeline">
-            </div>
-            <div class="form-group span-2">
-              <label>Job Description Text <span class="text-muted">(paste here if no URL, or leave blank)</span></label>
-              <textarea id="t-jd" rows="4" placeholder="Paste the full job description...">${esc(state._lastJD||'')}</textarea>
-            </div>
-          </div>
-          <div class="flex gap-3 mt-3" style="align-items:center;flex-wrap:wrap">
-            <div class="toggle-wrap">
-              <div class="toggle ${state._useAI !== false ? 'on' : ''}" id="ai-toggle" onclick="toggleAI()"></div>
-              <span class="toggle-label">Use AI tailoring</span>
-            </div>
-            <div class="toggle-wrap">
-              <div class="toggle ${state._rewrite ? 'on' : ''}" id="rewrite-toggle" onclick="toggleRewrite()"></div>
-              <span class="toggle-label">Allow bullet rewrites</span>
-            </div>
-            <div class="provider-seg" style="${state._useAI !== false ? '' : 'opacity:0.4;pointer-events:none'}">
-              ${['auto','anthropic','openai'].map(p => `<button class="seg-btn ${state.provider === p ? 'active' : ''}" onclick="setProvider('${p}')">${p === 'auto' ? 'Auto' : p === 'anthropic' ? 'Anthropic' : 'OpenAI'}</button>`).join('')}
-            </div>
-            <button class="btn btn-primary" id="tailor-btn" onclick="runTailor()">✨ Tailor CV</button>
+  const formCard = `
+    <div class="card ${hasTailored ? 'mb-3' : 'mb-4'}" id="tailor-form-card">
+      <div class="card-header" style="cursor:pointer;user-select:none" onclick="toggleTailorForm()">
+        <h2 style="pointer-events:none">Tailor to a Position</h2>
+        <span id="tailor-form-chevron" style="font-size:11px;color:var(--text-muted)">${hasTailored ? '▶ expand' : '▼'}</span>
+      </div>
+      <div class="card-body" id="tailor-form-body" style="${hasTailored ? 'display:none' : ''}">
+        <div class="form-grid cols-1 mb-2">
+          <div class="form-group">
+            <label>Job Posting URL <span class="text-muted">(optional — paste the URL to auto-fetch the JD)</span></label>
+            <input type="url" id="t-url" value="${esc(state._lastUrl||'')}" placeholder="https://company.com/jobs/role">
           </div>
         </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Role</label>
+            <input type="text" id="t-role" value="${esc(state._lastRole||'')}" placeholder="VP of Marketing">
+          </div>
+          <div class="form-group">
+            <label>Company</label>
+            <input type="text" id="t-company" value="${esc(state._lastCompany||'')}" placeholder="Acme Corp">
+          </div>
+          <div class="form-group span-2">
+            <label>Keywords / Emphasis <span class="text-muted">(comma-separated — optional)</span></label>
+            <input type="text" id="t-keywords" value="${esc(state._lastKeywords||'')}" placeholder="e.g. demand generation, ABM, pipeline">
+          </div>
+          <div class="form-group span-2">
+            <label>Job Description Text <span class="text-muted">(paste here if no URL, or leave blank)</span></label>
+            <textarea id="t-jd" rows="4" placeholder="Paste the full job description...">${esc(state._lastJD||'')}</textarea>
+          </div>
+        </div>
+        <div class="flex gap-3 mt-3" style="align-items:center;flex-wrap:wrap">
+          <div class="toggle-wrap">
+            <div class="toggle ${state._useAI !== false ? 'on' : ''}" id="ai-toggle" onclick="toggleAI()"></div>
+            <span class="toggle-label">Use AI tailoring</span>
+          </div>
+          <div class="toggle-wrap">
+            <div class="toggle ${state._rewrite ? 'on' : ''}" id="rewrite-toggle" onclick="toggleRewrite()"></div>
+            <span class="toggle-label">Allow bullet rewrites</span>
+          </div>
+          <div class="provider-seg" style="${state._useAI !== false ? '' : 'opacity:0.4;pointer-events:none'}">
+            ${['auto','anthropic','openai'].map(p => `<button class="seg-btn ${state.provider === p ? 'active' : ''}" onclick="setProvider('${p}')">${p === 'auto' ? 'Auto' : p === 'anthropic' ? 'Anthropic' : 'OpenAI'}</button>`).join('')}
+          </div>
+          <button class="btn btn-primary" id="tailor-btn" onclick="runTailor()">✨ Tailor CV</button>
+        </div>
       </div>
+    </div>`;
 
-      ${hasTailored ? renderDiff() : `
+  if (!hasTailored) {
+    return `
+      <div class="tailor-panel">
+        ${formCard}
         <div class="empty-state">
           <div class="empty-icon">✨</div>
           <h3>Ready to tailor</h3>
           <p>Fill in the details above and click "Tailor CV" to see AI-suggested changes.</p>
-        </div>`}
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="tailor-panel">
+      ${formCard}
+      <div class="tailor-results-split">
+        <div class="tailor-left-panel">
+          ${renderDiff()}
+        </div>
+        <div class="tailor-right-panel">
+          <div class="preview-toolbar">
+            <span class="preview-title">Live Preview</span>
+            <span class="preview-template">${esc(state.selectedTemplate)}</span>
+            <span class="preview-hint">Updates as you accept/reject</span>
+          </div>
+          <div class="preview-loading" id="preview-loading">
+            <span class="spinner"></span> Rendering…
+          </div>
+          <div class="preview-frame-wrapper" id="preview-frame-wrapper">
+            <iframe id="cv-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+          </div>
+        </div>
+      </div>
     </div>`;
+}
+
+function toggleTailorForm() {
+  const body = document.getElementById('tailor-form-body');
+  const chevron = document.getElementById('tailor-form-chevron');
+  if (!body) return;
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  if (chevron) chevron.textContent = hidden ? '▼' : '▶ expand';
 }
 
 function toggleAI() {
@@ -1028,6 +1069,8 @@ function toggleDiff(i) {
   const acceptedCount = state.tailoredDiff.filter((_, idx) => state._diffSelections[idx] !== false).length;
   const applyBtn = document.getElementById('apply-selected-btn');
   if (applyBtn) applyBtn.textContent = `Apply ${acceptedCount} of ${state.tailoredDiff.length} →`;
+  // Refresh the live preview
+  schedulePreviewRefresh();
 }
 
 async function applySelected() {
@@ -1075,6 +1118,74 @@ function gotoSection(section) {
   state.activeSection = sectionMap[section] || 'personal';
   renderSidebar();
   renderContent();
+}
+
+// ── Live preview ──────────────────────────────────────────────────────────
+let _previewDebounce = null;
+
+function getMergedProfile() {
+  // Build the "as-if-applied" profile: original + accepted tailored sections
+  const merged = JSON.parse(JSON.stringify(state.profile));
+  for (let i = 0; i < state.tailoredDiff.length; i++) {
+    if (state._diffSelections[i] === false) continue;
+    const section = state.tailoredDiff[i].section;
+    if (state.tailored[section] !== undefined) {
+      merged[section] = JSON.parse(JSON.stringify(state.tailored[section]));
+    }
+  }
+  return merged;
+}
+
+function schedulePreviewRefresh() {
+  clearTimeout(_previewDebounce);
+  _previewDebounce = setTimeout(refreshPreview, 250);
+}
+
+async function refreshPreview() {
+  if (!state.tailored) return;
+  const loading = document.getElementById('preview-loading');
+  const wrapper = document.getElementById('preview-frame-wrapper');
+  const frame = document.getElementById('cv-preview-frame');
+  if (!frame) return;
+
+  if (loading) loading.style.display = 'flex';
+  if (wrapper) wrapper.style.visibility = 'hidden';
+
+  try {
+    const merged = getMergedProfile();
+    const res = await api('POST', '/api/preview', { content: merged, template: state.selectedTemplate });
+    // Write into iframe without reloading (no flash)
+    const doc = frame.contentDocument || frame.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(res.html);
+      doc.close();
+      // Scale after content renders
+      requestAnimationFrame(() => { requestAnimationFrame(scalePreviewFrame); });
+    }
+  } catch (_) {
+    // silent — preview is best-effort
+  } finally {
+    if (loading) loading.style.display = 'none';
+    if (wrapper) wrapper.style.visibility = 'visible';
+  }
+}
+
+function scalePreviewFrame() {
+  const wrapper = document.getElementById('preview-frame-wrapper');
+  const frame = document.getElementById('cv-preview-frame');
+  if (!wrapper || !frame) return;
+  // Templates render at ~900px. Scale down to fit the panel.
+  const containerW = wrapper.clientWidth;
+  if (!containerW) return;
+  const CV_W = 900;
+  const scale = Math.min(1, containerW / CV_W);
+  const naturalH = frame.contentDocument?.body?.scrollHeight || 1300;
+  frame.style.width = CV_W + 'px';
+  frame.style.height = naturalH + 'px';
+  frame.style.transform = `scale(${scale})`;
+  frame.style.transformOrigin = 'top left';
+  wrapper.style.height = Math.ceil(naturalH * scale) + 'px';
 }
 
 // ── Settings tab ──────────────────────────────────────────────────────────

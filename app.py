@@ -210,6 +210,19 @@ def export_pdf(req: ExportRequest):
     return FileResponse(out_path, media_type="application/pdf", filename=f"{safe_name}.pdf")
 
 
+class PreviewRequest(BaseModel):
+    content: dict
+    template: str = "ember"
+
+
+@app.post("/api/preview")
+def preview_html(req: PreviewRequest):
+    """Render content to HTML in-memory (no file written) for live preview."""
+    from engine.layout import render_html
+    html = render_html(req.content, None, req.template)
+    return {"html": html}
+
+
 @app.post("/api/export/html")
 def export_html_preview(req: ExportRequest):
     if req.content is None:

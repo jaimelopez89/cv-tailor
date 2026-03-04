@@ -265,8 +265,10 @@ class BaseTemplate:
             return ""
         return "\n".join(f'<p class="notable-item">{self.h(n)}</p>' for n in notable)
 
-    def _write_html(self, html: str, output_path: str) -> str:
-        """Write HTML string to file."""
+    def _write_html(self, html: str, output_path) -> str:
+        """Write HTML string to file, or return it directly if output_path is None."""
+        if output_path is None:
+            return html
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
