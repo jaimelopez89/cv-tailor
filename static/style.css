@@ -407,6 +407,46 @@ textarea { resize: vertical; min-height: 90px; }
 
 /* ── Toggle switch ───────────────────────────────────────────────────────── */
 .toggle-wrap { display: flex; align-items: center; gap: 8px; }
+
+/* ── Provider segmented control ──────────────────────────────────────────── */
+.provider-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+  transition: opacity .2s;
+}
+.seg-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+  transition: background .15s, color .15s;
+}
+.seg-btn:last-child { border-right: none; }
+.seg-btn:hover { background: var(--accent-light); color: var(--text); }
+.seg-btn.active { background: var(--accent); color: #fff; }
+
+/* ── Tailor errors banner ─────────────────────────────────────────────────── */
+.tailor-errors {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tailor-error-item {
+  font-size: 12px;
+  color: #92400e;
+}
 .toggle {
   position: relative;
   width: 36px;

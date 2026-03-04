@@ -11,30 +11,53 @@ from collections import Counter
 import yaml
 
 
-def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = False) -> dict:
-    """Main entry: load master profile, tailor for target, return content dict.
+def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = False,
+           provider: str = "auto") -> tuple[dict, list[str]]:
+    """Main entry: load master profile, tailor for target, return (content, errors).
 
     Args:
         master_path: Path to master_profile.yaml
         target: Dict with company, role, emphasis (list of strings), jd_text (optional)
-        ai: Use Claude API for intelligent tailoring
+        ai: Use AI tailoring when a key is available
         rewrite: Allow AI to rewrite bullets (only with ai=True)
+        provider: "auto" | "anthropic" | "openai" — which LLM provider to use
+    Returns:
+        (tailored_content, errors) where errors is a list of human-readable strings
     """
     with open(master_path, "r") as f:
         master = yaml.safe_load(f)
 
+    errors = []
+
     if ai:
-        if os.environ.get("ANTHROPIC_API_KEY"):
+        use_anthropic = provider in ("auto", "anthropic") and os.environ.get("ANTHROPIC_API_KEY")
+        use_openai    = provider in ("auto", "openai")    and os.environ.get("OPENAI_API_KEY")
+
+        if provider == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
+            errors.append("Anthropic API key not set. Add it in Settings.")
+        elif provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
+            errors.append("OpenAI API key not set. Add it in Settings.")
+        elif provider == "auto" and not use_anthropic and not use_openai:
+            errors.append("No AI API key configured. Using keyword-based tailoring. Add a key in Settings.")
+
+        if use_anthropic:
             try:
-                return _ai_tailor(master, target, rewrite)
+                return _ai_tailor(master, target, rewrite), errors
             except Exception as e:
-                print(f"Anthropic tailoring failed ({e}), trying OpenAI.")
-        if os.environ.get("OPENAI_API_KEY"):
+                errors.append(f"Anthropic tailoring failed: {e}")
+                if provider == "anthropic":
+                    return _deterministic_tailor(master, target), errors
+
+        if use_openai:
             try:
-                return _openai_tailor(master, target, rewrite)
+                return _openai_tailor(master, target, rewrite), errors
             except Exception as e:
-                print(f"OpenAI tailoring failed ({e}), falling back to deterministic.")
-    return _deterministic_tailor(master, target)
+                errors.append(f"OpenAI tailoring failed: {e}")
+
+        if errors:
+            errors.append("Fell back to keyword-based tailoring.")
+
+    return _deterministic_tailor(master, target), errors
 
 
 def _deterministic_tailor(master: dict, target: dict) -> dict:
@@ -250,7 +273,8 @@ notable: (copy from master exactly)"""
 
 
 def _openai_tailor(master: dict, target: dict, rewrite: bool = False) -> dict:
-    """Use OpenAI gpt-4o-mini for intelligent tailoring."""
+    """Use OpenAI gpt-4o-mini for intelligent tailoring (JSON output to avoid YAML parse issues)."""
+    import json
     from openai import OpenAI
 
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -259,60 +283,57 @@ def _openai_tailor(master: dict, target: dict, rewrite: bool = False) -> dict:
 
     client = OpenAI(api_key=api_key)
 
-    master_yaml = yaml.dump(master, default_flow_style=False, allow_unicode=True)
+    # Send master as JSON (avoids YAML colon ambiguity in the prompt)
+    master_json = json.dumps(master, ensure_ascii=False, indent=2)
     target_desc = f"Company: {target.get('company', 'Unknown')}\n"
     target_desc += f"Role: {target.get('role', 'Unknown')}\n"
     if target.get("emphasis"):
         target_desc += f"Emphasis: {', '.join(target['emphasis'])}\n"
     if target.get("jd_text"):
-        target_desc += f"\nJob Description:\n{target['jd_text']}\n"
+        target_desc += f"\nJob Description:\n{target['jd_text'][:2000]}\n"
 
     rewrite_instruction = (
-        "- You MAY rewrite bullet text to better position for the role, but preserve "
+        "You MAY rewrite bullet text to better position for the role, but preserve "
         "all factual claims, metrics, and specificity. Never invent achievements."
         if rewrite else
-        "- Do NOT rewrite bullets. Select and reorder only. Use exact original text."
+        "Do NOT rewrite bullets. Select and reorder only. Use exact original text."
     )
 
     system_msg = (
-        "You are an expert CV editor. Return only valid YAML — no markdown fences, "
-        "no explanation. Every fact in the output must come from the master profile."
+        "You are an expert CV editor. Return only a JSON object — no markdown, no explanation. "
+        "Every fact in the output must come from the master profile. Never fabricate content."
     )
     user_msg = f"""Tailor this CV for the target role.
-
-CRITICAL: Never fabricate content. Only select, reorder, and (if allowed) rephrase.
 
 TARGET:
 {target_desc}
 
-MASTER PROFILE:
-{master_yaml}
+MASTER PROFILE (JSON):
+{master_json}
 
 INSTRUCTIONS:
-1. Select best summary variant or use default.
-2. Select and reorder 3-5 strongest bullets per experience entry.
+1. Select the best summary variant or use default.
+2. Select and reorder 3-5 strongest bullets per experience entry for this role.
 3. Reorder experience entries to lead with most relevant.
 4. Select top 4 metrics most relevant to this role.
 5. Reorder skill groups to lead with most relevant.
 6. Select most relevant speaking entries.
-{rewrite_instruction}
+7. {rewrite_instruction}
 
-Return ONLY valid YAML with keys: meta, summary, metrics, experience, ventures, education, skills, speaking, notable"""
+Return a JSON object with these exact top-level keys (copy unchanged sections verbatim from master):
+meta, summary, metrics, experience, ventures, education, skills, speaking, notable"""
 
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=4000,
+        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_msg},
         ],
     )
 
-    text = resp.choices[0].message.content.strip()
-    if text.startswith("```"):
-        text = "\n".join(l for l in text.split("\n") if not l.startswith("```"))
-
-    content = yaml.safe_load(text)
+    content = json.loads(resp.choices[0].message.content)
     if not isinstance(content, dict) or "meta" not in content:
         raise ValueError("OpenAI response missing required fields")
 

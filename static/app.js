@@ -9,6 +9,7 @@ const state = {
   dirty: false,
   templates: [],
   settings: { anthropic_api_key_set: false, anthropic_api_key_preview: '', openai_api_key_set: false, openai_api_key_preview: '' },
+  provider: 'auto',  // "auto" | "anthropic" | "openai"
 };
 
 // ── Boot ──────────────────────────────────────────────────────────────────
@@ -733,11 +734,14 @@ function renderTailorTab() {
           <div class="flex gap-3 mt-3" style="align-items:center;flex-wrap:wrap">
             <div class="toggle-wrap">
               <div class="toggle ${state._useAI !== false ? 'on' : ''}" id="ai-toggle" onclick="toggleAI()"></div>
-              <span class="toggle-label">Use AI tailoring (Claude)</span>
+              <span class="toggle-label">Use AI tailoring</span>
             </div>
             <div class="toggle-wrap">
               <div class="toggle ${state._rewrite ? 'on' : ''}" id="rewrite-toggle" onclick="toggleRewrite()"></div>
               <span class="toggle-label">Allow bullet rewrites</span>
+            </div>
+            <div class="provider-seg" style="${state._useAI !== false ? '' : 'opacity:0.4;pointer-events:none'}">
+              ${['auto','anthropic','openai'].map(p => `<button class="seg-btn ${state.provider === p ? 'active' : ''}" onclick="setProvider('${p}')">${p === 'auto' ? 'Auto' : p === 'anthropic' ? 'Anthropic' : 'OpenAI'}</button>`).join('')}
             </div>
             <button class="btn btn-primary" id="tailor-btn" onclick="runTailor()">✨ Tailor CV</button>
           </div>
@@ -756,10 +760,19 @@ function renderTailorTab() {
 function toggleAI() {
   state._useAI = state._useAI === false ? true : false;
   document.getElementById('ai-toggle').classList.toggle('on', state._useAI !== false);
+  const seg = document.querySelector('.provider-seg');
+  if (seg) seg.style.opacity = state._useAI !== false ? '' : '0.4';
+  if (seg) seg.style.pointerEvents = state._useAI !== false ? '' : 'none';
 }
 function toggleRewrite() {
   state._rewrite = !state._rewrite;
   document.getElementById('rewrite-toggle').classList.toggle('on', !!state._rewrite);
+}
+function setProvider(p) {
+  state.provider = p;
+  document.querySelectorAll('.seg-btn').forEach(b =>
+    b.classList.toggle('active', b.getAttribute('onclick') === `setProvider('${p}')`)
+  );
 }
 
 async function runTailor() {
@@ -795,18 +808,15 @@ async function runTailor() {
       emphasis: keywords ? keywords.split(',').map(k => k.trim()).filter(Boolean) : [],
       use_ai: state._useAI !== false,
       rewrite: !!state._rewrite,
+      provider: state.provider,
     });
     state.tailored = res.tailored;
     state.tailoredDiff = res.diff;
     state._fit = res.fit || null;
     state._jdPreview = res.jd_preview;
-    state._urlWarning = res.url_warning || null;
+    state._errors = res.errors || [];
     renderContent();
-    if (res.url_warning) {
-      toast(`⚠️ ${res.url_warning}`, '');
-    } else {
-      toast(`Tailored! ${res.diff.length} section(s) changed.`, 'success');
-    }
+    toast(`Tailored! ${res.diff.length} section(s) changed.${state._errors.length ? ` (${state._errors.length} warning(s))` : ''}`, 'success');
   } catch (e) {
     toast(e.message, 'error');
     // Also show inline so it's impossible to miss
@@ -929,7 +939,7 @@ function renderDiff() {
           <button class="btn btn-primary" onclick="applyTailored()">Apply &amp; Save Tailored CV →</button>
         </div>
       </div>
-      ${state._urlWarning ? `<div style="background:#fef3c7;border:1px solid #fcd34d;color:#92400e;padding:10px 14px;border-radius:6px;font-size:12px;margin-bottom:10px;">⚠️ ${esc(state._urlWarning)}</div>` : ''}
+      ${state._errors?.length ? `<div class="tailor-errors">${state._errors.map(e => `<div class="tailor-error-item">⚠️ ${esc(e)}</div>`).join('')}</div>` : ''}
       ${focusHtml}
       ${state._jdPreview ? `<div class="jd-preview"><strong>JD preview:</strong> ${esc(state._jdPreview)}…</div>` : ''}
       <div class="mt-3">${blocks}</div>
@@ -965,6 +975,7 @@ function discardTailored() {
   state.tailored = null;
   state.tailoredDiff = [];
   state._fit = null;
+  state._errors = [];
   renderContent();
 }
 

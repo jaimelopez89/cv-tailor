@@ -46,6 +46,7 @@ class TailorRequest(BaseModel):
     emphasis: list[str] = []
     use_ai: bool = True
     rewrite: bool = False
+    provider: str = "auto"  # "auto" | "anthropic" | "openai"
 
 
 class ExportRequest(BaseModel):
@@ -162,21 +163,30 @@ def tailor_cv(req: TailorRequest):
     with open(MASTER_PROFILE) as f:
         master = yaml.safe_load(f) or {}
 
+    errors = []
+    if url_warning:
+        errors.append(url_warning)
+
     try:
         from engine.tailor import tailor
-        tailored = tailor(str(MASTER_PROFILE), target, ai=req.use_ai, rewrite=req.rewrite)
+        tailored, tailor_errors = tailor(
+            str(MASTER_PROFILE), target,
+            ai=req.use_ai, rewrite=req.rewrite, provider=req.provider,
+        )
+        errors.extend(tailor_errors)
     except Exception as e:
         raise HTTPException(500, f"Tailoring failed: {e}")
 
     diff = _compute_diff(master, tailored)
-    fit = _analyze_fit(master, jd_text, req.emphasis, req.role, req.company)
+    fit, fit_errors = _analyze_fit(master, jd_text, req.emphasis, req.role, req.company, req.provider)
+    errors.extend(fit_errors)
 
     return {
         "tailored": tailored,
         "diff": diff,
         "fit": fit,
         "jd_preview": jd_text[:500] if jd_text else "",
-        "url_warning": url_warning,
+        "errors": errors,
     }
 
 
@@ -260,24 +270,31 @@ def _fetch_url_text(url: str) -> str:
     return text[:10000]
 
 
-def _analyze_fit(profile: dict, jd_text: str, emphasis: list, role: str, company: str) -> dict:
-    """AI-powered fit analysis: score, key points, gaps, and suggestions.
+def _analyze_fit(profile: dict, jd_text: str, emphasis: list, role: str, company: str,
+                 provider: str = "auto") -> tuple[dict, list[str]]:
+    """AI-powered fit analysis. Returns (result, errors)."""
+    errors = []
 
-    Tries Anthropic first, then OpenAI, then falls back to deterministic.
-    """
     if jd_text or role:
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            try:
-                return _ai_fit_analysis(profile, jd_text, emphasis, role, company)
-            except Exception as e:
-                print(f"Anthropic fit analysis failed ({e}), trying OpenAI.")
-        if os.environ.get("OPENAI_API_KEY"):
-            try:
-                return _openai_fit_analysis(profile, jd_text, emphasis, role, company)
-            except Exception as e:
-                print(f"OpenAI fit analysis failed ({e}), using deterministic fallback.")
+        use_anthropic = provider in ("auto", "anthropic") and os.environ.get("ANTHROPIC_API_KEY")
+        use_openai    = provider in ("auto", "openai")    and os.environ.get("OPENAI_API_KEY")
 
-    return _deterministic_fit_analysis(profile, jd_text, emphasis, role, company)
+        if use_anthropic:
+            try:
+                return _ai_fit_analysis(profile, jd_text, emphasis, role, company), errors
+            except Exception as e:
+                errors.append(f"Anthropic fit analysis failed: {e}")
+
+        if use_openai:
+            try:
+                return _openai_fit_analysis(profile, jd_text, emphasis, role, company), errors
+            except Exception as e:
+                errors.append(f"OpenAI fit analysis failed: {e}")
+
+        if errors:
+            errors.append("Fit analysis fell back to keyword matching.")
+
+    return _deterministic_fit_analysis(profile, jd_text, emphasis, role, company), errors
 
 
 def _ai_fit_analysis(profile: dict, jd_text: str, emphasis: list, role: str, company: str) -> dict:
