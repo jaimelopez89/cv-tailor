@@ -304,43 +304,44 @@ textarea { resize: vertical; min-height: 90px; }
 /* Split layout when results are present */
 .tailor-results-split {
   display: flex;
-  gap: 16px;
+  gap: 20px;
   align-items: flex-start;
 }
 .tailor-panel:has(.tailor-results-split) {
   max-width: none;
 }
+
+/* Left panel — changes + fit analysis */
 .tailor-left-panel {
-  flex: 0 0 400px;
+  flex: 0 0 420px;
+  width: 420px;
   min-width: 0;
-  max-height: calc(100vh - 160px);
+  max-width: 420px;
+  overflow: hidden;
+  max-height: calc(100vh - 180px);
   overflow-y: auto;
   position: sticky;
   top: 0;
-  padding-right: 4px;
 }
+
+/* Right panel — live preview */
 .tailor-right-panel {
   flex: 1;
   min-width: 0;
   position: sticky;
   top: 0;
-  max-height: calc(100vh - 160px);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
-/* Preview toolbar */
+/* Preview chrome */
 .preview-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 14px;
   background: var(--card);
   border: 1px solid var(--border);
   border-bottom: none;
   border-radius: var(--radius) var(--radius) 0 0;
-  flex-shrink: 0;
 }
 .preview-title { font-size: 12px; font-weight: 700; color: var(--text); }
 .preview-template {
@@ -355,36 +356,33 @@ textarea { resize: vertical; min-height: 90px; }
 }
 .preview-hint { font-size: 11px; color: var(--text-muted); margin-left: auto; }
 
-/* Loading overlay */
-.preview-loading {
-  display: none;
-  align-items: center;
-  gap: 8px;
-  position: absolute;
-  top: 42px; left: 0; right: 0;
-  background: rgba(255,255,255,.85);
-  padding: 10px 16px;
-  font-size: 12px;
-  color: var(--text-muted);
-  z-index: 10;
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 var(--radius) var(--radius);
-}
-
-/* Frame wrapper + iframe */
+/* Frame wrapper — explicit height so iframe is always visible */
 .preview-frame-wrapper {
-  flex: 1;
   border: 1px solid var(--border);
   border-radius: 0 0 var(--radius) var(--radius);
   overflow: hidden;
-  background: #f0ede8;
+  background: #e8e4de;
   position: relative;
+  height: calc(100vh - 220px);
+}
+/* Loading overlay inside wrapper */
+.preview-loading {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: absolute;
+  inset: 0;
+  background: rgba(232,228,222,.85);
+  font-size: 12px;
+  color: var(--text-muted);
+  z-index: 10;
 }
 .cv-preview-frame {
   border: none;
   display: block;
   background: #fff;
+  /* actual dimensions set by scalePreviewFrame() in JS */
 }
 
 .diff-badge {
@@ -412,14 +410,14 @@ textarea { resize: vertical; min-height: 90px; }
 }
 .diff-block-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
   background: #f5f4f1;
   border-bottom: 1px solid var(--border);
 }
-.diff-block-header h3 { font-size: 13px; font-weight: 600; }
-.diff-block-actions { display: flex; align-items: center; gap: 8px; }
+.diff-block-header h3 { font-size: 13px; font-weight: 600; margin: 0; }
+.diff-block-actions { display: flex; align-items: center; gap: 6px; }
 
 /* Accept / Reject toggle button */
 .diff-toggle {
@@ -691,17 +689,17 @@ textarea { resize: vertical; min-height: 90px; }
 }
 .fit-header {
   display: flex;
-  align-items: flex-start;
-  gap: 20px;
+  flex-direction: column;
+  gap: 10px;
   margin-bottom: 16px;
-  padding-bottom: 16px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
 }
 .fit-score-block {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .fit-meter {
   display: flex;
@@ -724,10 +722,10 @@ textarea { resize: vertical; min-height: 90px; }
   white-space: nowrap;
 }
 .fit-summary {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--text-muted);
   line-height: 1.6;
-  flex: 1;
+  word-wrap: break-word;
 }
 .fit-section {
   margin-bottom: 14px;
@@ -750,7 +748,7 @@ textarea { resize: vertical; min-height: 90px; }
   gap: 5px;
 }
 .fit-list li {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
   padding: 6px 10px;
   border-radius: 6px;

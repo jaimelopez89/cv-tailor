@@ -1144,30 +1144,27 @@ function schedulePreviewRefresh() {
 async function refreshPreview() {
   if (!state.tailored) return;
   const loading = document.getElementById('preview-loading');
-  const wrapper = document.getElementById('preview-frame-wrapper');
   const frame = document.getElementById('cv-preview-frame');
   if (!frame) return;
 
   if (loading) loading.style.display = 'flex';
-  if (wrapper) wrapper.style.visibility = 'hidden';
 
   try {
     const merged = getMergedProfile();
     const res = await api('POST', '/api/preview', { content: merged, template: state.selectedTemplate });
-    // Write into iframe without reloading (no flash)
     const doc = frame.contentDocument || frame.contentWindow?.document;
     if (doc) {
+      // Write HTML; onload fires after render, then we scale
+      frame.onload = () => {
+        scalePreviewFrame();
+        if (loading) loading.style.display = 'none';
+      };
       doc.open();
       doc.write(res.html);
       doc.close();
-      // Scale after content renders
-      requestAnimationFrame(() => { requestAnimationFrame(scalePreviewFrame); });
     }
   } catch (_) {
-    // silent — preview is best-effort
-  } finally {
     if (loading) loading.style.display = 'none';
-    if (wrapper) wrapper.style.visibility = 'visible';
   }
 }
 
@@ -1175,17 +1172,19 @@ function scalePreviewFrame() {
   const wrapper = document.getElementById('preview-frame-wrapper');
   const frame = document.getElementById('cv-preview-frame');
   if (!wrapper || !frame) return;
-  // Templates render at ~900px. Scale down to fit the panel.
   const containerW = wrapper.clientWidth;
   if (!containerW) return;
+  // CV templates render at 900px natural width; scale to fit panel
   const CV_W = 900;
-  const scale = Math.min(1, containerW / CV_W);
-  const naturalH = frame.contentDocument?.body?.scrollHeight || 1300;
+  const scale = Math.min(1, (containerW - 2) / CV_W);
+  // Use scrollHeight if available (iframe fully loaded), else fixed A4×2 height
+  const body = frame.contentDocument?.body;
+  const naturalH = (body && body.scrollHeight > 100) ? body.scrollHeight : 2200;
   frame.style.width = CV_W + 'px';
   frame.style.height = naturalH + 'px';
   frame.style.transform = `scale(${scale})`;
   frame.style.transformOrigin = 'top left';
-  wrapper.style.height = Math.ceil(naturalH * scale) + 'px';
+  // Don't override wrapper height — it's set by CSS to fill the panel
 }
 
 // ── Settings tab ──────────────────────────────────────────────────────────
