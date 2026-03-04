@@ -799,7 +799,7 @@ async function runTailor() {
     });
     state.tailored = res.tailored;
     state.tailoredDiff = res.diff;
-    state._focusAreas = res.focus_areas || null;
+    state._fit = res.fit || null;
     state._jdPreview = res.jd_preview;
     state._urlWarning = res.url_warning || null;
     renderContent();
@@ -886,18 +886,38 @@ function renderDiff() {
       </div>`;
   }).join('');
 
-  // Focus areas panel
+  // Fit analysis panel
   let focusHtml = '';
-  const fa = state._focusAreas;
-  if (fa && (fa.keywords?.length || fa.themes?.length || fa.suggestions?.length)) {
-    const kwHtml = (fa.keywords || []).map(k => `<span class="focus-tag focus-tag-kw">${esc(k)}</span>`).join('');
-    const thHtml = (fa.themes || []).map(t => `<span class="focus-tag focus-tag-th">${esc(t)}</span>`).join('');
-    const sugHtml = (fa.suggestions || []).map(s => `<li>${esc(s)}</li>`).join('');
+  const fit = state._fit;
+  if (fit) {
+    const score = fit.fit_score ?? 0;
+    const label = fit.fit_label || '';
+    const scoreColor = score >= 75 ? 'var(--fit-high)' : score >= 50 ? 'var(--fit-mid)' : 'var(--fit-low)';
+
+    const meterDots = Array.from({length: 10}, (_, i) =>
+      `<span class="fit-dot ${i < Math.round(score / 10) ? 'on' : ''}" style="${i < Math.round(score / 10) ? `background:${scoreColor}` : ''}"></span>`
+    ).join('');
+
+    const section = (icon, title, items, cls) => items?.length ? `
+      <div class="fit-section">
+        <div class="fit-section-title">${icon} ${title}</div>
+        <ul class="fit-list ${cls}">${items.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+      </div>` : '';
+
     focusHtml = `
-      <div class="focus-panel">
-        <h3 class="focus-panel-title">Focus Areas &amp; Interview Prep</h3>
-        ${kwHtml || thHtml ? `<div class="focus-tags">${kwHtml}${thHtml}</div>` : ''}
-        ${sugHtml ? `<ul class="focus-suggestions">${sugHtml}</ul>` : ''}
+      <div class="fit-panel">
+        <div class="fit-header">
+          <div class="fit-score-block">
+            <div class="fit-meter">${meterDots}</div>
+            <span class="fit-score-num" style="color:${scoreColor}">${score}%</span>
+            <span class="fit-label" style="color:${scoreColor}">${esc(label)}</span>
+          </div>
+          ${fit.fit_summary ? `<p class="fit-summary">${esc(fit.fit_summary)}</p>` : ''}
+        </div>
+        ${section('🎯', 'Key points to hit', fit.key_points, 'fit-list-key')}
+        ${section('✅', 'Strengths for this role', fit.strengths, 'fit-list-strength')}
+        ${section('⚠️', 'Gaps to address', fit.gaps, 'fit-list-gap')}
+        ${section('📝', 'Suggested CV improvements', fit.suggestions, 'fit-list-suggest')}
       </div>`;
   }
 
@@ -945,7 +965,7 @@ async function applyTailored() {
 function discardTailored() {
   state.tailored = null;
   state.tailoredDiff = [];
-  state._focusAreas = null;
+  state._fit = null;
   renderContent();
 }
 

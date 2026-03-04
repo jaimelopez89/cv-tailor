@@ -160,12 +160,12 @@ def tailor_cv(req: TailorRequest):
         raise HTTPException(500, f"Tailoring failed: {e}")
 
     diff = _compute_diff(master, tailored)
-    focus_areas = _extract_focus_areas(jd_text, req.emphasis, req.role, req.company)
+    fit = _analyze_fit(master, jd_text, req.emphasis, req.role, req.company)
 
     return {
         "tailored": tailored,
         "diff": diff,
-        "focus_areas": focus_areas,
+        "fit": fit,
         "jd_preview": jd_text[:500] if jd_text else "",
         "url_warning": url_warning,
     }
@@ -251,50 +251,224 @@ def _fetch_url_text(url: str) -> str:
     return text[:10000]
 
 
-def _extract_focus_areas(jd_text: str, emphasis: list, role: str, company: str) -> list:
-    """Extract key focus areas and interview tips from JD and target info."""
+def _analyze_fit(profile: dict, jd_text: str, emphasis: list, role: str, company: str) -> dict:
+    """AI-powered fit analysis: score, key points, gaps, and suggestions.
+
+    Returns a dict with fit_score, fit_label, fit_summary, key_points,
+    strengths, gaps, and suggestions. Falls back to deterministic analysis
+    if no API key is set.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if api_key and (jd_text or role):
+        try:
+            return _ai_fit_analysis(profile, jd_text, emphasis, role, company)
+        except Exception as e:
+            print(f"AI fit analysis failed ({e}), using deterministic fallback.")
+
+    return _deterministic_fit_analysis(profile, jd_text, emphasis, role, company)
+
+
+def _ai_fit_analysis(profile: dict, jd_text: str, emphasis: list, role: str, company: str) -> dict:
+    """Use Claude to produce a structured fit analysis."""
+    import anthropic
+    import json
+
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    # Build a compact CV summary for the prompt
+    meta = profile.get("meta", {})
+    summary = profile.get("summary", "")
+    if isinstance(summary, dict):
+        summary = summary.get("default", "")
+
+    exp_lines = []
+    for entry in profile.get("experience", [])[:6]:
+        company_name = entry.get("company", "")
+        roles = [r.get("title", "") for r in entry.get("roles", [])]
+        bullets = [b.get("text", "") if isinstance(b, dict) else str(b)
+                   for b in entry.get("bullets", [])[:3]]
+        exp_lines.append(f"- {company_name} | {', '.join(roles)}")
+        for b in bullets:
+            exp_lines.append(f"  · {b}")
+
+    skills_lines = []
+    skills = profile.get("skills", {})
+    for g in (skills.get("groups", []) if isinstance(skills, dict) else [])[:4]:
+        items = ", ".join(g.get("items", [])[:6])
+        skills_lines.append(f"- {g.get('name', '')}: {items}")
+
+    cv_digest = f"""Name/Role: {meta.get('name', '')} — {meta.get('tagline', '')}
+Summary: {summary[:400]}
+Experience:
+{chr(10).join(exp_lines)}
+Skills:
+{chr(10).join(skills_lines)}"""
+
+    target_desc = f"Role: {role}\nCompany: {company}"
+    if emphasis:
+        target_desc += f"\nEmphasis: {', '.join(emphasis)}"
+    if jd_text:
+        target_desc += f"\n\nJob Description:\n{jd_text[:3000]}"
+
+    prompt = f"""You are an expert CV reviewer and recruiter. Analyse how well this CV fits the target role.
+
+TARGET:
+{target_desc}
+
+CANDIDATE CV DIGEST:
+{cv_digest}
+
+Return ONLY a JSON object (no markdown, no explanation) with exactly this structure:
+{{
+  "fit_score": <integer 0-100>,
+  "fit_label": <"Excellent Match"|"Strong Match"|"Good Match"|"Partial Match"|"Weak Match">,
+  "fit_summary": "<2-3 sentences: what makes them a match or not, be specific and honest>",
+  "key_points": [
+    "<specific point to hit on the CV or in the application — actionable, e.g. 'Lead with the €X pipeline impact at Company Y'>",
+    ...
+  ],
+  "strengths": [
+    "<specific strength from the CV that fits this role>",
+    ...
+  ],
+  "gaps": [
+    "<specific requirement from the JD that is absent or weak in the CV>",
+    ...
+  ],
+  "suggestions": [
+    "<concrete, specific edit to the CV — e.g. 'Add Salesforce to your skills section' or 'Quantify team size in the Acme role'>",
+    ...
+  ]
+}}
+
+Rules:
+- key_points: 3-5 items, each is a SPECIFIC action tied to the JD (not generic advice)
+- strengths: 3-5 items grounded in the actual CV content
+- gaps: 2-4 honest gaps; if genuinely few, say so
+- suggestions: 3-5 concrete edits, section-specific where possible
+- fit_score: be realistic — a 90+ means near-perfect, 50-70 is a real candidate with gaps"""
+
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1200,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    text = message.content[0].text.strip()
+    # Strip markdown fences if present
+    if text.startswith("```"):
+        text = "\n".join(l for l in text.split("\n") if not l.startswith("```"))
+
+    result = json.loads(text)
+
+    # Validate and coerce required keys
+    result.setdefault("fit_score", 50)
+    result.setdefault("fit_label", "Partial Match")
+    result.setdefault("fit_summary", "")
+    result.setdefault("key_points", [])
+    result.setdefault("strengths", [])
+    result.setdefault("gaps", [])
+    result.setdefault("suggestions", [])
+    result["fit_score"] = max(0, min(100, int(result["fit_score"])))
+    return result
+
+
+def _deterministic_fit_analysis(profile: dict, jd_text: str, emphasis: list, role: str, company: str) -> dict:
+    """Keyword-based fallback fit analysis when no AI key is available."""
     import re
     from collections import Counter
 
-    areas = []
+    # Build a text blob from the CV
+    cv_text_parts = []
+    summary = profile.get("summary", "")
+    if isinstance(summary, dict):
+        summary = summary.get("default", "")
+    cv_text_parts.append(summary)
 
-    # Emphasis keywords are explicit focus areas
-    for e in emphasis:
-        if e.strip():
-            areas.append({"type": "keyword", "text": e.strip()})
+    for entry in profile.get("experience", []):
+        cv_text_parts.append(entry.get("company", ""))
+        for r in entry.get("roles", []):
+            cv_text_parts.append(r.get("title", ""))
+        for b in entry.get("bullets", []):
+            cv_text_parts.append(b.get("text", "") if isinstance(b, dict) else str(b))
 
-    # Extract high-frequency meaningful words from JD
-    if jd_text:
-        words = re.findall(r"[a-zA-Z]{4,}", jd_text.lower())
-        stopwords = {
-            "that", "this", "with", "from", "your", "will", "have", "been",
-            "their", "they", "also", "about", "more", "into", "over", "such",
-            "both", "each", "some", "what", "when", "which", "where", "than",
-            "then", "them", "these", "those", "very", "just", "only", "must",
-            "role", "work", "team", "help", "able", "make", "well", "good",
-            "looking", "experience", "ability", "skills", "company",
-        }
-        freq = Counter(w for w in words if w not in stopwords)
-        top_jd = [w for w, _ in freq.most_common(10) if _ >= 2]
-        for w in top_jd[:6]:
-            # Don't duplicate emphasis keywords
-            if not any(w.lower() in a["text"].lower() for a in areas):
-                areas.append({"type": "jd_theme", "text": w})
+    skills = profile.get("skills", {})
+    for g in (skills.get("groups", []) if isinstance(skills, dict) else []):
+        cv_text_parts.extend(g.get("items", []))
 
-    # Build actionable suggestions
-    suggestions = []
+    cv_text = " ".join(cv_text_parts).lower()
+
+    # Extract meaningful JD keywords
+    stopwords = {
+        "the", "and", "for", "with", "you", "our", "that", "this", "are",
+        "will", "have", "from", "your", "about", "who", "can", "all", "not",
+        "they", "was", "been", "more", "role", "work", "team", "help", "able",
+        "make", "well", "good", "must", "should", "would", "their", "also",
+        "into", "over", "both", "each", "some", "what", "when", "which",
+    }
+    jd_words = re.findall(r"[a-zA-Z]{4,}", (jd_text or "").lower())
+    freq = Counter(w for w in jd_words if w not in stopwords)
+    jd_keywords = [w for w, c in freq.most_common(20) if c >= 2]
+
+    # Emphasis keywords always count as JD keywords
+    emphasis_words = [e.lower().strip() for e in emphasis if e.strip()]
+    for ew in emphasis_words:
+        if ew not in jd_keywords:
+            jd_keywords.insert(0, ew)
+
+    # Score: fraction of JD keywords present in CV
+    if jd_keywords:
+        matched = [kw for kw in jd_keywords if kw in cv_text]
+        score = int(len(matched) / len(jd_keywords) * 100)
+    else:
+        score = 50
+        matched = []
+
+    unmatched = [kw for kw in jd_keywords if kw not in cv_text]
+
+    if score >= 80:
+        label = "Excellent Match"
+    elif score >= 65:
+        label = "Strong Match"
+    elif score >= 50:
+        label = "Good Match"
+    elif score >= 35:
+        label = "Partial Match"
+    else:
+        label = "Weak Match"
+
+    key_points = []
     if role:
-        suggestions.append(f"Lead with experience most relevant to the {role} role.")
-    if company:
-        suggestions.append(f"Research {company}'s products and recent news for the interview.")
+        key_points.append(f"Position yourself explicitly for the {role} role in your summary.")
     if emphasis:
-        suggestions.append(f"Be ready to give concrete examples of: {', '.join(emphasis[:3])}.")
-    if jd_text and len(jd_text) > 200:
-        suggestions.append("Review the job description for specific tools and methodologies mentioned.")
+        key_points.append(f"Make sure '{emphasis[0]}' is prominent in your experience bullets.")
+    if unmatched:
+        key_points.append(f"Address missing keywords: {', '.join(unmatched[:3])}.")
+    if company:
+        key_points.append(f"Mirror {company}'s language and values in your summary.")
+
+    strengths = [f"CV matches {len(matched)} of {len(jd_keywords)} key JD terms"] if matched else []
+    if matched:
+        strengths += [f"Strong alignment on: {', '.join(matched[:4])}"]
+
+    gaps = [f"Not found in CV: {kw}" for kw in unmatched[:4]]
+
+    suggestions = []
+    if unmatched:
+        suggestions.append(f"Add missing terms to relevant bullets: {', '.join(unmatched[:3])}.")
+    if role:
+        suggestions.append(f"Tailor your summary opening to name the {role} role specifically.")
+    if company:
+        suggestions.append(f"Research {company}'s recent news and reflect their priorities.")
+    suggestions.append("Quantify every achievement with a specific metric if not already done.")
 
     return {
-        "keywords": [a["text"] for a in areas if a["type"] == "keyword"],
-        "themes": [a["text"] for a in areas if a["type"] == "jd_theme"],
+        "fit_score": score,
+        "fit_label": label,
+        "fit_summary": f"Keyword analysis found {len(matched)} of {len(jd_keywords)} JD terms in your CV. Enable AI tailoring for a deeper semantic assessment.",
+        "key_points": key_points,
+        "strengths": strengths,
+        "gaps": gaps,
         "suggestions": suggestions,
     }
 
