@@ -3,6 +3,7 @@ const state = {
   profile: null,
   tailored: null,
   tailoredDiff: [],
+  _diffSelections: {},  // index -> true (accepted) | false (rejected); default = accepted
   activeTab: 'edit',
   activeSection: 'personal',
   selectedTemplate: 'ember',
@@ -838,7 +839,10 @@ function renderDiff() {
     return `<div class="card"><div class="card-body"><p class="text-muted">No changes detected — your CV already matches well!</p></div></div>`;
   }
 
-  const blocks = diff.map(d => {
+  const acceptedCount = diff.filter((_, i) => state._diffSelections[i] !== false).length;
+
+  const blocks = diff.map((d, i) => {
+    const rejected = state._diffSelections[i] === false;
     let badge = `<span class="diff-badge ${d.type}">${d.type}</span>`;
     let body = '';
 
@@ -887,9 +891,17 @@ function renderDiff() {
     }
 
     return `
-      <div class="diff-block">
+      <div class="diff-block ${rejected ? 'diff-rejected' : ''}" data-diff-index="${i}">
         <div class="diff-block-header">
-          <h3>${esc(d.label)}</h3>${badge}
+          <h3>${esc(d.label)}</h3>
+          <div class="diff-block-actions">
+            ${badge}
+            <button class="diff-toggle ${rejected ? 'diff-toggle-rejected' : 'diff-toggle-accepted'}"
+                    onclick="toggleDiff(${i})"
+                    title="${rejected ? 'Click to accept this change' : 'Click to reject this change'}">
+              ${rejected ? '✗ Rejected' : '✓ Accepted'}
+            </button>
+          </div>
         </div>
         ${body}
       </div>`;
@@ -907,10 +919,26 @@ function renderDiff() {
       `<span class="fit-dot ${i < Math.round(score / 10) ? 'on' : ''}" style="${i < Math.round(score / 10) ? `background:${scoreColor}` : ''}"></span>`
     ).join('');
 
-    const section = (icon, title, items, cls) => items?.length ? `
+    const listSection = (icon, title, items, cls) => items?.length ? `
       <div class="fit-section">
         <div class="fit-section-title">${icon} ${title}</div>
         <ul class="fit-list ${cls}">${items.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+      </div>` : '';
+
+    const recsHtml = fit.recommendations?.length ? `
+      <div class="fit-section">
+        <div class="fit-section-title">💡 Proactive recommendations</div>
+        <div class="rec-list">
+          ${fit.recommendations.map(r => `
+            <div class="rec-item">
+              <div class="rec-header">
+                <span class="rec-location">${esc(r.location || '')}</span>
+                <button class="rec-goto" onclick="gotoSection('${r.section || ''}')">→ Edit</button>
+              </div>
+              <div class="rec-suggestion">${esc(r.suggestion || '')}</div>
+              ${r.draft ? `<div class="rec-draft">${esc(r.draft)}</div>` : ''}
+            </div>`).join('')}
+        </div>
       </div>` : '';
 
     focusHtml = `
@@ -923,20 +951,21 @@ function renderDiff() {
           </div>
           ${fit.fit_summary ? `<p class="fit-summary">${esc(fit.fit_summary)}</p>` : ''}
         </div>
-        ${section('🎯', 'Key points to hit', fit.key_points, 'fit-list-key')}
-        ${section('✅', 'Strengths for this role', fit.strengths, 'fit-list-strength')}
-        ${section('⚠️', 'Gaps to address', fit.gaps, 'fit-list-gap')}
-        ${section('📝', 'Suggested CV improvements', fit.suggestions, 'fit-list-suggest')}
+        ${listSection('🎯', 'Key points to hit', fit.key_points, 'fit-list-key')}
+        ${listSection('✅', 'Strengths for this role', fit.strengths, 'fit-list-strength')}
+        ${listSection('⚠️', 'Gaps to address', fit.gaps, 'fit-list-gap')}
+        ${listSection('📝', 'Suggested CV improvements', fit.suggestions, 'fit-list-suggest')}
+        ${recsHtml}
       </div>`;
   }
 
   return `
     <div>
       <div class="flex-between mb-3">
-        <h2 style="font-size:15px;font-weight:600;">${diff.length} change(s) to apply</h2>
+        <h2 style="font-size:15px;font-weight:600;">${diff.length} proposed change(s)</h2>
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-sm" onclick="discardTailored()">Discard</button>
-          <button class="btn btn-primary" onclick="applyTailored()">Apply &amp; Save Tailored CV →</button>
+          <button class="btn btn-primary" id="apply-selected-btn" onclick="applySelected()">Apply ${acceptedCount} of ${diff.length} →</button>
         </div>
       </div>
       ${state._errors?.length ? `<div class="tailor-errors">${state._errors.map(e => `<div class="tailor-error-item">⚠️ ${esc(e)}</div>`).join('')}</div>` : ''}
@@ -974,8 +1003,77 @@ async function applyTailored() {
 function discardTailored() {
   state.tailored = null;
   state.tailoredDiff = [];
+  state._diffSelections = {};
   state._fit = null;
   state._errors = [];
+  renderContent();
+}
+
+function toggleDiff(i) {
+  state._diffSelections[i] = state._diffSelections[i] === false ? true : false;
+  // Re-render just the diff blocks without full page re-render
+  const block = document.querySelector(`.diff-block[data-diff-index="${i}"]`);
+  const rejected = state._diffSelections[i] === false;
+  if (block) {
+    block.classList.toggle('diff-rejected', rejected);
+    const btn = block.querySelector('.diff-toggle');
+    if (btn) {
+      btn.classList.toggle('diff-toggle-accepted', !rejected);
+      btn.classList.toggle('diff-toggle-rejected', rejected);
+      btn.textContent = rejected ? '✗ Rejected' : '✓ Accepted';
+      btn.title = rejected ? 'Click to accept this change' : 'Click to reject this change';
+    }
+  }
+  // Update the apply button count
+  const acceptedCount = state.tailoredDiff.filter((_, idx) => state._diffSelections[idx] !== false).length;
+  const applyBtn = document.getElementById('apply-selected-btn');
+  if (applyBtn) applyBtn.textContent = `Apply ${acceptedCount} of ${state.tailoredDiff.length} →`;
+}
+
+async function applySelected() {
+  if (!state.tailored) return;
+  const accepted = state.tailoredDiff.filter((_, i) => state._diffSelections[i] !== false);
+  if (accepted.length === 0) {
+    toast('No changes selected — toggle at least one to accept.', '');
+    return;
+  }
+  const btn = document.getElementById('apply-selected-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+  try {
+    // Deep-clone current profile, then overlay each accepted section from tailored
+    const merged = JSON.parse(JSON.stringify(state.profile));
+    for (let i = 0; i < state.tailoredDiff.length; i++) {
+      if (state._diffSelections[i] === false) continue;
+      const section = state.tailoredDiff[i].section;
+      if (state.tailored[section] !== undefined) {
+        merged[section] = JSON.parse(JSON.stringify(state.tailored[section]));
+      }
+    }
+    await api('PUT', '/api/profile', merged);
+    state.profile = merged;
+    state.tailored = null;
+    state.tailoredDiff = [];
+    state._diffSelections = {};
+    state._fit = null;
+    state._errors = [];
+    state.dirty = false;
+    renderContent();
+    toast(`Applied ${accepted.length} change(s) ✓`, 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = `Apply ${accepted.length} of ${state.tailoredDiff.length} →`; }
+  }
+}
+
+function gotoSection(section) {
+  const sectionMap = {
+    summary: 'summary', experience: 'experience', metrics: 'metrics',
+    skills: 'skills', speaking: 'speaking', ventures: 'ventures',
+    education: 'education', projects: 'projects',
+  };
+  state.activeTab = 'edit';
+  state.activeSection = sectionMap[section] || 'personal';
+  renderSidebar();
   renderContent();
 }
 

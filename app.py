@@ -368,6 +368,15 @@ Return ONLY a JSON object (no markdown, no explanation) with exactly this struct
   "suggestions": [
     "<concrete, specific edit to the CV — e.g. 'Add Salesforce to your skills section' or 'Quantify team size in the Acme role'>",
     ...
+  ],
+  "recommendations": [
+    {{
+      "section": "<one of: summary|experience|metrics|skills|speaking|ventures|education>",
+      "location": "<specific location e.g. 'Aiven experience' or 'Profile summary' or 'Skills — Technical'>",
+      "suggestion": "<one actionable sentence: exactly what to add or change and why it helps for this role>",
+      "draft": "<optional: a concrete example sentence or phrase they could paste in — leave empty string if not applicable>"
+    }},
+    ...
   ]
 }}
 
@@ -376,6 +385,9 @@ Rules:
 - strengths: 3-5 items grounded in the actual CV content
 - gaps: 2-4 honest gaps; if genuinely few, say so
 - suggestions: 3-5 concrete edits, section-specific where possible
+- recommendations: 3-5 items — these are PROACTIVE CV edits directly addressing the gaps above.
+  Each must name the exact section and location, give a one-sentence action, and optionally a draft phrase.
+  These should be more specific than suggestions — tied to the actual CV content.
 - fit_score: be realistic — a 90+ means near-perfect, 50-70 is a real candidate with gaps"""
 
     message = client.messages.create(
@@ -399,6 +411,7 @@ Rules:
     result.setdefault("strengths", [])
     result.setdefault("gaps", [])
     result.setdefault("suggestions", [])
+    result.setdefault("recommendations", [])
     result["fit_score"] = max(0, min(100, int(result["fit_score"])))
     return result
 
@@ -463,10 +476,18 @@ Return a JSON object with exactly this structure:
   "key_points": ["<specific action tied to the JD>", ...],
   "strengths": ["<specific strength from the CV>", ...],
   "gaps": ["<specific gap between JD and CV>", ...],
-  "suggestions": ["<concrete CV edit>", ...]
+  "suggestions": ["<concrete CV edit>", ...],
+  "recommendations": [
+    {{
+      "section": "<summary|experience|metrics|skills|speaking|ventures|education>",
+      "location": "<e.g. 'Aiven experience' or 'Profile summary'>",
+      "suggestion": "<one actionable sentence: exactly what to add or change>",
+      "draft": "<example phrase they could paste in, or empty string>"
+    }}
+  ]
 }}
 
-Rules: key_points 3-5 items, strengths 3-5, gaps 2-4, suggestions 3-5. Be specific."""
+Rules: key_points 3-5, strengths 3-5, gaps 2-4, suggestions 3-5, recommendations 3-5. Be specific and tie recommendations to actual CV sections."""
 
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -486,6 +507,7 @@ Rules: key_points 3-5 items, strengths 3-5, gaps 2-4, suggestions 3-5. Be specif
     result.setdefault("strengths", [])
     result.setdefault("gaps", [])
     result.setdefault("suggestions", [])
+    result.setdefault("recommendations", [])
     result["fit_score"] = max(0, min(100, int(result["fit_score"])))
     return result
 
@@ -587,6 +609,7 @@ def _deterministic_fit_analysis(profile: dict, jd_text: str, emphasis: list, rol
         "strengths": strengths,
         "gaps": gaps,
         "suggestions": suggestions,
+        "recommendations": [],
     }
 
 
