@@ -56,6 +56,7 @@ class ExportRequest(BaseModel):
 
 class SettingsModel(BaseModel):
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
 
 
 # ── Profile ───────────────────────────────────────────────────────────────────
@@ -89,11 +90,13 @@ def list_templates_endpoint():
 @app.get("/api/settings")
 def get_settings():
     s = _load_settings()
-    key = s.get("anthropic_api_key", "")
+    ant = s.get("anthropic_api_key", "")
+    oai = s.get("openai_api_key", "")
     return {
-        "anthropic_api_key": key,
-        "anthropic_api_key_set": bool(key),
-        "anthropic_api_key_preview": f"{key[:8]}…{key[-4:]}" if len(key) > 12 else ("set" if key else ""),
+        "anthropic_api_key_set": bool(ant),
+        "anthropic_api_key_preview": f"{ant[:8]}…{ant[-4:]}" if len(ant) > 12 else ("set" if ant else ""),
+        "openai_api_key_set": bool(oai),
+        "openai_api_key_preview": f"{oai[:8]}…{oai[-4:]}" if len(oai) > 12 else ("set" if oai else ""),
     }
 
 
@@ -103,6 +106,9 @@ def save_settings(data: SettingsModel):
     if data.anthropic_api_key:
         settings["anthropic_api_key"] = data.anthropic_api_key
         os.environ["ANTHROPIC_API_KEY"] = data.anthropic_api_key
+    if data.openai_api_key:
+        settings["openai_api_key"] = data.openai_api_key
+        os.environ["OPENAI_API_KEY"] = data.openai_api_key
     with open(SETTINGS_FILE, "w") as f:
         yaml.dump(settings, f, allow_unicode=True)
     return {"status": "saved"}
@@ -116,11 +122,14 @@ def _load_settings() -> dict:
 
 
 def _apply_settings():
-    """Load saved API key into environment on startup."""
+    """Load saved API keys into environment on startup."""
     s = _load_settings()
-    key = s.get("anthropic_api_key", "")
-    if key and not os.environ.get("ANTHROPIC_API_KEY"):
-        os.environ["ANTHROPIC_API_KEY"] = key
+    ant = s.get("anthropic_api_key", "")
+    oai = s.get("openai_api_key", "")
+    if ant and not os.environ.get("ANTHROPIC_API_KEY"):
+        os.environ["ANTHROPIC_API_KEY"] = ant
+    if oai and not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = oai
 
 
 # Apply on import so the key is available before any request
@@ -254,16 +263,19 @@ def _fetch_url_text(url: str) -> str:
 def _analyze_fit(profile: dict, jd_text: str, emphasis: list, role: str, company: str) -> dict:
     """AI-powered fit analysis: score, key points, gaps, and suggestions.
 
-    Returns a dict with fit_score, fit_label, fit_summary, key_points,
-    strengths, gaps, and suggestions. Falls back to deterministic analysis
-    if no API key is set.
+    Tries Anthropic first, then OpenAI, then falls back to deterministic.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if api_key and (jd_text or role):
-        try:
-            return _ai_fit_analysis(profile, jd_text, emphasis, role, company)
-        except Exception as e:
-            print(f"AI fit analysis failed ({e}), using deterministic fallback.")
+    if jd_text or role:
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            try:
+                return _ai_fit_analysis(profile, jd_text, emphasis, role, company)
+            except Exception as e:
+                print(f"Anthropic fit analysis failed ({e}), trying OpenAI.")
+        if os.environ.get("OPENAI_API_KEY"):
+            try:
+                return _openai_fit_analysis(profile, jd_text, emphasis, role, company)
+            except Exception as e:
+                print(f"OpenAI fit analysis failed ({e}), using deterministic fallback.")
 
     return _deterministic_fit_analysis(profile, jd_text, emphasis, role, company)
 
@@ -362,6 +374,93 @@ Rules:
     result = json.loads(text)
 
     # Validate and coerce required keys
+    result.setdefault("fit_score", 50)
+    result.setdefault("fit_label", "Partial Match")
+    result.setdefault("fit_summary", "")
+    result.setdefault("key_points", [])
+    result.setdefault("strengths", [])
+    result.setdefault("gaps", [])
+    result.setdefault("suggestions", [])
+    result["fit_score"] = max(0, min(100, int(result["fit_score"])))
+    return result
+
+
+def _openai_fit_analysis(profile: dict, jd_text: str, emphasis: list, role: str, company: str) -> dict:
+    """Use OpenAI gpt-4o-mini to produce a structured fit analysis."""
+    import json
+    from openai import OpenAI
+
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+    # Reuse the same CV digest logic
+    meta = profile.get("meta", {})
+    summary = profile.get("summary", "")
+    if isinstance(summary, dict):
+        summary = summary.get("default", "")
+
+    exp_lines = []
+    for entry in profile.get("experience", [])[:6]:
+        roles = [r.get("title", "") for r in entry.get("roles", [])]
+        bullets = [b.get("text", "") if isinstance(b, dict) else str(b)
+                   for b in entry.get("bullets", [])[:3]]
+        exp_lines.append(f"- {entry.get('company', '')} | {', '.join(roles)}")
+        for b in bullets:
+            exp_lines.append(f"  · {b}")
+
+    skills_lines = []
+    skills = profile.get("skills", {})
+    for g in (skills.get("groups", []) if isinstance(skills, dict) else [])[:4]:
+        skills_lines.append(f"- {g.get('name', '')}: {', '.join(g.get('items', [])[:6])}")
+
+    cv_digest = f"""Name/Role: {meta.get('name', '')} — {meta.get('tagline', '')}
+Summary: {summary[:400]}
+Experience:
+{chr(10).join(exp_lines)}
+Skills:
+{chr(10).join(skills_lines)}"""
+
+    target_desc = f"Role: {role}\nCompany: {company}"
+    if emphasis:
+        target_desc += f"\nEmphasis: {', '.join(emphasis)}"
+    if jd_text:
+        target_desc += f"\n\nJob Description:\n{jd_text[:3000]}"
+
+    system_msg = (
+        "You are an expert CV reviewer and recruiter. "
+        "Return only a JSON object — no markdown, no explanation."
+    )
+    user_msg = f"""Analyse how well this CV fits the target role.
+
+TARGET:
+{target_desc}
+
+CANDIDATE CV DIGEST:
+{cv_digest}
+
+Return a JSON object with exactly this structure:
+{{
+  "fit_score": <integer 0-100>,
+  "fit_label": <"Excellent Match"|"Strong Match"|"Good Match"|"Partial Match"|"Weak Match">,
+  "fit_summary": "<2-3 sentences: specific and honest>",
+  "key_points": ["<specific action tied to the JD>", ...],
+  "strengths": ["<specific strength from the CV>", ...],
+  "gaps": ["<specific gap between JD and CV>", ...],
+  "suggestions": ["<concrete CV edit>", ...]
+}}
+
+Rules: key_points 3-5 items, strengths 3-5, gaps 2-4, suggestions 3-5. Be specific."""
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=1000,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ],
+    )
+
+    result = json.loads(resp.choices[0].message.content)
     result.setdefault("fit_score", 50)
     result.setdefault("fit_label", "Partial Match")
     result.setdefault("fit_summary", "")

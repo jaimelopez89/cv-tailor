@@ -24,11 +24,16 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Fal
         master = yaml.safe_load(f)
 
     if ai:
-        try:
-            return _ai_tailor(master, target, rewrite)
-        except Exception as e:
-            print(f"AI tailoring failed ({e}), falling back to deterministic.")
-            return _deterministic_tailor(master, target)
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            try:
+                return _ai_tailor(master, target, rewrite)
+            except Exception as e:
+                print(f"Anthropic tailoring failed ({e}), trying OpenAI.")
+        if os.environ.get("OPENAI_API_KEY"):
+            try:
+                return _openai_tailor(master, target, rewrite)
+            except Exception as e:
+                print(f"OpenAI tailoring failed ({e}), falling back to deterministic.")
     return _deterministic_tailor(master, target)
 
 
@@ -239,6 +244,77 @@ notable: (copy from master exactly)"""
     content = yaml.safe_load(response_text)
     if not isinstance(content, dict) or "meta" not in content:
         raise ValueError("AI response missing required fields")
+
+    content["_target"] = target
+    return content
+
+
+def _openai_tailor(master: dict, target: dict, rewrite: bool = False) -> dict:
+    """Use OpenAI gpt-4o-mini for intelligent tailoring."""
+    from openai import OpenAI
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not set")
+
+    client = OpenAI(api_key=api_key)
+
+    master_yaml = yaml.dump(master, default_flow_style=False, allow_unicode=True)
+    target_desc = f"Company: {target.get('company', 'Unknown')}\n"
+    target_desc += f"Role: {target.get('role', 'Unknown')}\n"
+    if target.get("emphasis"):
+        target_desc += f"Emphasis: {', '.join(target['emphasis'])}\n"
+    if target.get("jd_text"):
+        target_desc += f"\nJob Description:\n{target['jd_text']}\n"
+
+    rewrite_instruction = (
+        "- You MAY rewrite bullet text to better position for the role, but preserve "
+        "all factual claims, metrics, and specificity. Never invent achievements."
+        if rewrite else
+        "- Do NOT rewrite bullets. Select and reorder only. Use exact original text."
+    )
+
+    system_msg = (
+        "You are an expert CV editor. Return only valid YAML — no markdown fences, "
+        "no explanation. Every fact in the output must come from the master profile."
+    )
+    user_msg = f"""Tailor this CV for the target role.
+
+CRITICAL: Never fabricate content. Only select, reorder, and (if allowed) rephrase.
+
+TARGET:
+{target_desc}
+
+MASTER PROFILE:
+{master_yaml}
+
+INSTRUCTIONS:
+1. Select best summary variant or use default.
+2. Select and reorder 3-5 strongest bullets per experience entry.
+3. Reorder experience entries to lead with most relevant.
+4. Select top 4 metrics most relevant to this role.
+5. Reorder skill groups to lead with most relevant.
+6. Select most relevant speaking entries.
+{rewrite_instruction}
+
+Return ONLY valid YAML with keys: meta, summary, metrics, experience, ventures, education, skills, speaking, notable"""
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=4000,
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ],
+    )
+
+    text = resp.choices[0].message.content.strip()
+    if text.startswith("```"):
+        text = "\n".join(l for l in text.split("\n") if not l.startswith("```"))
+
+    content = yaml.safe_load(text)
+    if not isinstance(content, dict) or "meta" not in content:
+        raise ValueError("OpenAI response missing required fields")
 
     content["_target"] = target
     return content

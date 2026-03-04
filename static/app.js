@@ -8,7 +8,7 @@ const state = {
   selectedTemplate: 'ember',
   dirty: false,
   templates: [],
-  settings: { anthropic_api_key_set: false, anthropic_api_key_preview: '' },
+  settings: { anthropic_api_key_set: false, anthropic_api_key_preview: '', openai_api_key_set: false, openai_api_key_preview: '' },
 };
 
 // ── Boot ──────────────────────────────────────────────────────────────────
@@ -63,14 +63,13 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
-  const keyInput = document.getElementById('s-api-key');
-  if (!keyInput) return;
-  const key = keyInput.value.trim();
+  const antKey = (document.getElementById('s-ant-key')?.value || '').trim();
+  const oaiKey = (document.getElementById('s-oai-key')?.value || '').trim();
   const btn = document.getElementById('settings-save-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>';
   try {
-    await api('PUT', '/api/settings', { anthropic_api_key: key });
+    await api('PUT', '/api/settings', { anthropic_api_key: antKey, openai_api_key: oaiKey });
     await loadSettings();
     renderContent();
     toast('Settings saved ✓', 'success');
@@ -78,7 +77,7 @@ async function saveSettings() {
     toast(e.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = 'Save Key';
+    btn.innerHTML = 'Save Keys';
   }
 }
 
@@ -972,32 +971,33 @@ function discardTailored() {
 // ── Settings tab ──────────────────────────────────────────────────────────
 function renderSettingsTab() {
   const s = state.settings;
-  const isSet = s.anthropic_api_key_set;
-  const preview = s.anthropic_api_key_preview || '';
+
+  const keyRow = (id, label, isSet, preview, placeholder) => `
+    <div class="form-group mb-3">
+      <label>${label} ${isSet ? `<code class="api-key-status set" style="font-size:11px;padding:2px 6px;">✓ ${esc(preview)}</code>` : '<span class="api-key-status unset" style="font-size:11px;">not set</span>'}</label>
+      <div class="input-with-toggle">
+        <input type="password" id="${id}" placeholder="${isSet ? 'Enter new key to replace…' : placeholder}"
+          autocomplete="off" spellcheck="false">
+        <button class="show-btn" onclick="toggleKeyVisibility('${id}')">Show</button>
+      </div>
+    </div>`;
+
+  const hasAny = s.anthropic_api_key_set || s.openai_api_key_set;
   return `
     <div style="max-width:560px">
       <div class="card mb-4">
         <div class="card-header">
-          <h2>Claude API Key</h2>
-          <span class="api-key-status ${isSet ? 'set' : 'unset'}">
-            ${isSet ? '✓ Key saved' : '✗ Not set'}
-          </span>
+          <h2>AI Provider Keys</h2>
+          <span class="api-key-status ${hasAny ? 'set' : 'unset'}">${hasAny ? '✓ AI enabled' : '✗ Not set'}</span>
         </div>
         <div class="card-body">
-          ${isSet ? `<p class="text-sm text-muted mb-2">Current key: <code>${esc(preview)}</code></p>` : ''}
-          <div class="form-group mb-3">
-            <label>Anthropic API Key</label>
-            <div class="input-with-toggle">
-              <input type="password" id="s-api-key" placeholder="${isSet ? 'Enter new key to replace…' : 'sk-ant-api03-…'}"
-                autocomplete="off" spellcheck="false">
-              <button class="show-btn" onclick="toggleKeyVisibility()">Show</button>
-            </div>
-          </div>
-          <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save Key</button>
+          ${keyRow('s-ant-key', 'Anthropic (Claude)', s.anthropic_api_key_set, s.anthropic_api_key_preview, 'sk-ant-api03-…')}
+          ${keyRow('s-oai-key', 'OpenAI (gpt-4o-mini)', s.openai_api_key_set, s.openai_api_key_preview, 'sk-…')}
+          <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">Save Keys</button>
           <div class="info-box mt-3">
-            <strong>Where to get a key:</strong> <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com/settings/keys</a><br>
-            The key is stored locally in <code>data/settings.yaml</code> and never leaves your machine.<br>
-            Without a key, AI tailoring will fall back to tag-based (deterministic) tailoring.
+            <strong>Priority:</strong> Anthropic is used when set; OpenAI is the fallback. Both can coexist.<br>
+            Keys are stored locally in <code>data/settings.yaml</code> and never leave your machine.<br>
+            Without any key, tailoring uses tag-based (deterministic) mode.
           </div>
         </div>
       </div>
@@ -1016,17 +1016,14 @@ function renderSettingsTab() {
     </div>`;
 }
 
-function toggleKeyVisibility() {
-  const input = document.getElementById('s-api-key');
-  const btn = document.querySelector('.show-btn');
+function toggleKeyVisibility(id) {
+  const input = document.getElementById(id);
   if (!input) return;
-  if (input.type === 'password') {
-    input.type = 'text';
-    btn.textContent = 'Hide';
-  } else {
-    input.type = 'password';
-    btn.textContent = 'Show';
-  }
+  const isPassword = input.type === 'password';
+  input.type = isPassword ? 'text' : 'password';
+  // Find the sibling show-btn
+  const btn = input.parentElement.querySelector('.show-btn');
+  if (btn) btn.textContent = isPassword ? 'Hide' : 'Show';
 }
 
 // ── Export tab ────────────────────────────────────────────────────────────
