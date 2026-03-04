@@ -283,16 +283,17 @@ def _analyze_fit(profile: dict, jd_text: str, emphasis: list, role: str, company
             try:
                 return _ai_fit_analysis(profile, jd_text, emphasis, role, company), errors
             except Exception as e:
-                errors.append(f"Anthropic fit analysis failed: {e}")
+                if provider == "anthropic":
+                    errors.append(f"Anthropic fit analysis failed: {e}")
+                # auto mode: silently try next provider
 
         if use_openai:
             try:
                 return _openai_fit_analysis(profile, jd_text, emphasis, role, company), errors
             except Exception as e:
-                errors.append(f"OpenAI fit analysis failed: {e}")
-
-        if errors:
-            errors.append("Fit analysis fell back to keyword matching.")
+                if provider == "openai":
+                    errors.append(f"OpenAI fit analysis failed: {e}")
+                # auto mode: silently fall through to deterministic
 
     return _deterministic_fit_analysis(profile, jd_text, emphasis, role, company), errors
 

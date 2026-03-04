@@ -42,22 +42,35 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Fal
 
         if use_anthropic:
             try:
-                return _ai_tailor(master, target, rewrite), errors
+                return _resolve_summary(_ai_tailor(master, target, rewrite), master, target), errors
             except Exception as e:
-                errors.append(f"Anthropic tailoring failed: {e}")
                 if provider == "anthropic":
+                    errors.append(f"Anthropic tailoring failed: {e}")
                     return _deterministic_tailor(master, target), errors
+                # auto mode: silently try next provider
 
         if use_openai:
             try:
-                return _openai_tailor(master, target, rewrite), errors
+                return _resolve_summary(_openai_tailor(master, target, rewrite), master, target), errors
             except Exception as e:
-                errors.append(f"OpenAI tailoring failed: {e}")
+                if provider == "openai":
+                    errors.append(f"OpenAI tailoring failed: {e}")
+                # auto mode: silently fall through to deterministic
 
-        if errors:
+        if provider == "auto" and (use_anthropic or use_openai):
+            errors.append("AI tailoring unavailable. Using keyword-based tailoring.")
+        elif errors:
             errors.append("Fell back to keyword-based tailoring.")
 
     return _deterministic_tailor(master, target), errors
+
+
+def _resolve_summary(content: dict, master: dict, target: dict) -> dict:
+    """If AI returned summary as a dict (copied from master), resolve it to a string."""
+    if isinstance(content.get("summary"), dict):
+        target_tags = _extract_tags(target.get("emphasis", []), target.get("jd_text", ""))
+        content["summary"] = _select_summary(master.get("summary", {}), target_tags)
+    return content
 
 
 def _deterministic_tailor(master: dict, target: dict) -> dict:
