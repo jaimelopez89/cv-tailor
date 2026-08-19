@@ -11,6 +11,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import Paragraph
 
+from engine.metrics import renderable_metrics
 from engine.templates.base import BaseTemplate
 
 PAGE_W, PAGE_H = A4
@@ -103,7 +104,7 @@ class EmberTemplate(BaseTemplate):
             y -= h + 8
 
         # Metrics
-        metrics = ct.get("metrics", [])[:4]
+        metrics = renderable_metrics(ct.get("metrics"))
         if metrics:
             n = len(metrics); cw = CW/n
             ty = y + 2
@@ -320,6 +321,9 @@ class EmberTemplate(BaseTemplate):
         summary = ct.get("summary","")
         if isinstance(summary, dict): summary = summary.get("default","")
 
+        metrics_row = self.html_metrics(renderable_metrics(ct.get("metrics")))
+        metrics_section = f'<section class="metrics">{metrics_row}</section>' if metrics_row else ""
+
         html = self.html_head(
             f"{name} - CV",
             EMBER_CSS,
@@ -335,7 +339,7 @@ class EmberTemplate(BaseTemplate):
     <p class="contact">{contact}</p>
   </header>
   <section class="summary"><h2>Summary</h2><p>{self.h(summary)}</p></section>
-  <section class="metrics">{self.html_metrics(ct.get("metrics",[])[:4])}</section>
+  {metrics_section}
   <section class="experience"><h2>Experience</h2>{self.html_experience(ct.get("experience",[]))}</section>
 </div>
 <div class="page page-2">

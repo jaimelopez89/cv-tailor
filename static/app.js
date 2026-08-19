@@ -4,6 +4,16 @@ const state = {
   tailored: null,
   tailoredDiff: [],
   _diffSelections: {},  // index -> true (accepted) | false (rejected); default = accepted
+  draft: null,             // editable tailored CV — NEVER written back to the master profile
+  draftMeta: null,          // { role, company, seniority } the draft was written for
+  _seniority: null,         // detected seniority for the current target
+  _warnings: [],            // fabrication warnings from the verifier
+  cover: null,              // generated cover letter (editable)
+  coverMeta: null,          // { role, company } the letter was written for
+  _coverWarnings: [],
+  _coverErrors: [],
+  _coverTone: 'executive',
+  _coverLength: 'medium',
   activeTab: 'edit',
   activeSection: 'personal',
   selectedTemplate: 'ember',
@@ -11,6 +21,7 @@ const state = {
   templates: [],
   settings: { anthropic_api_key_set: false, anthropic_api_key_preview: '', openai_api_key_set: false, openai_api_key_preview: '' },
   provider: 'auto',  // "auto" | "anthropic" | "openai"
+  _rewrite: true,    // aggressive rewriting is the default
 };
 
 // ── Boot ──────────────────────────────────────────────────────────────────
@@ -180,7 +191,11 @@ function renderContent() {
     case 'edit':     el.innerHTML = renderEditTab(); attachEditListeners(); break;
     case 'tailor':
       el.innerHTML = renderTailorTab();
-      if (state.tailored) setTimeout(refreshPreview, 80);
+      if (state.tailored || state.draft) setTimeout(refreshPreview, 80);
+      break;
+    case 'cover':
+      el.innerHTML = renderCoverTab();
+      if (state.cover) setTimeout(refreshCoverPreview, 80);
       break;
     case 'export':   el.innerHTML = renderExportTab(); break;
     case 'settings': el.innerHTML = renderSettingsTab(); break;
@@ -284,12 +299,19 @@ function renderExpEntry(e, i) {
       <button class="btn btn-danger btn-sm" onclick="removeRole(${i},${ri})">✕</button>
     </div>`).join('');
 
+  const bulletCount = (e.bullets || []).length;
   const bullets = (e.bullets || []).map((b, bi) => {
     const text = typeof b === 'string' ? b : (b.text || '');
     const tags = typeof b === 'object' ? (b.tags || []).join(', ') : '';
     const weight = typeof b === 'object' ? (b.weight ?? 5) : 5;
     return `
       <div class="bullet-item" id="bullet-${i}-${bi}">
+        <div class="bullet-reorder">
+          <button class="btn btn-ghost btn-move" title="Move bullet up"
+            onclick="moveBullet(${i},${bi},-1)" ${bi === 0 ? 'disabled' : ''}>↑</button>
+          <button class="btn btn-ghost btn-move" title="Move bullet down"
+            onclick="moveBullet(${i},${bi},1)" ${bi === bulletCount - 1 ? 'disabled' : ''}>↓</button>
+        </div>
         <div style="flex:1">
           <textarea oninput="updateBullet(${i},${bi},'text',this.value);markDirty()" placeholder="Describe your achievement...">${esc(text)}</textarea>
           <div class="bullet-meta">
@@ -404,6 +426,24 @@ function removeBullet(i, bi) {
   state.profile.experience[i].bullets.splice(bi, 1);
   markDirty();
   renderContent();
+}
+
+// Move a bullet up (dir = -1) or down (dir = +1) within its entry.
+function moveBullet(i, bi, dir) {
+  const bullets = state.profile.experience[i].bullets || [];
+  const target = bi + dir;
+  if (target < 0 || target >= bullets.length) return;
+  [bullets[bi], bullets[target]] = [bullets[target], bullets[bi]];
+  markDirty();
+  renderContent();
+  // Keep the moved bullet in view and visibly marked after the re-render.
+  setTimeout(() => {
+    const el = document.getElementById(`bullet-${i}-${target}`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    el.classList.add('bullet-moved');
+    setTimeout(() => el.classList.remove('bullet-moved'), 600);
+  }, 30);
 }
 
 function updateBullet(i, bi, field, val) {
@@ -743,8 +783,16 @@ function renderTailorTab() {
             <span class="toggle-label">Use AI tailoring</span>
           </div>
           <div class="toggle-wrap">
-            <div class="toggle ${state._rewrite ? 'on' : ''}" id="rewrite-toggle" onclick="toggleRewrite()"></div>
-            <span class="toggle-label">Allow bullet rewrites</span>
+            <div class="toggle ${state._rewrite !== false ? 'on' : ''}" id="rewrite-toggle" onclick="toggleRewrite()"></div>
+            <span class="toggle-label" title="On: every bullet is rewritten in the job ad's language. Off: select and reorder only.">Aggressive rewriting</span>
+          </div>
+          <div class="form-group" style="margin:0;min-width:170px">
+            <label style="font-size:11px">Seniority</label>
+            <select id="t-seniority" onchange="state._seniorityOverride=this.value">
+              <option value="">Auto-detect</option>
+              ${['ic','lead','manager','director','vp','c_suite'].map(l =>
+                `<option value="${l}" ${state._seniorityOverride === l ? 'selected' : ''}>${SENIORITY_LABELS[l]}</option>`).join('')}
+            </select>
           </div>
           <div class="provider-seg" style="${state._useAI !== false ? '' : 'opacity:0.4;pointer-events:none'}">
             ${['auto','anthropic','openai'].map(p => `<button class="seg-btn ${state.provider === p ? 'active' : ''}" onclick="setProvider('${p}')">${p === 'auto' ? 'Auto' : p === 'anthropic' ? 'Anthropic' : 'OpenAI'}</button>`).join('')}
@@ -753,6 +801,31 @@ function renderTailorTab() {
         </div>
       </div>
     </div>`;
+
+  if (!hasTailored && state.draft) {
+    return `
+      <div class="tailor-panel">
+        ${formCard}
+        <div class="tailor-results-split">
+          <div class="tailor-left-panel">
+            ${renderDraftEditor()}
+          </div>
+          <div class="tailor-right-panel">
+            <div class="preview-toolbar">
+              <span class="preview-title">Live Preview</span>
+              <span class="preview-template">${esc(state.selectedTemplate)}</span>
+              <span class="preview-hint">Updates as you type</span>
+            </div>
+            <div class="preview-loading" id="preview-loading">
+              <span class="spinner"></span> Rendering…
+            </div>
+            <div class="preview-frame-wrapper" id="preview-frame-wrapper">
+              <iframe id="cv-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
 
   if (!hasTailored) {
     return `
@@ -807,9 +880,14 @@ function toggleAI() {
   if (seg) seg.style.pointerEvents = state._useAI !== false ? '' : 'none';
 }
 function toggleRewrite() {
-  state._rewrite = !state._rewrite;
-  document.getElementById('rewrite-toggle').classList.toggle('on', !!state._rewrite);
+  state._rewrite = state._rewrite === false ? true : false;
+  document.getElementById('rewrite-toggle').classList.toggle('on', state._rewrite !== false);
 }
+
+const SENIORITY_LABELS = {
+  ic: 'Individual contributor', lead: 'Lead / Principal', manager: 'Manager',
+  director: 'Director', vp: 'VP / Head of', c_suite: 'C-suite / Founder',
+};
 function setProvider(p) {
   state.provider = p;
   document.querySelectorAll('.seg-btn').forEach(b =>
@@ -838,7 +916,7 @@ async function runTailor() {
   state._lastJD = jd;
 
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Tailoring…';
+  btn.innerHTML = '<span class="spinner"></span> Tailoring… (up to a minute)';
 
   try {
     // Auto-save first
@@ -849,14 +927,19 @@ async function runTailor() {
       url, jd_text: jd, role, company,
       emphasis: keywords ? keywords.split(',').map(k => k.trim()).filter(Boolean) : [],
       use_ai: state._useAI !== false,
-      rewrite: !!state._rewrite,
+      rewrite: state._rewrite !== false,
       provider: state.provider,
+      seniority: state._seniorityOverride || '',
     });
     state.tailored = res.tailored;
     state.tailoredDiff = res.diff;
     state._fit = res.fit || null;
+    state._seniority = res.seniority || null;
+    state._warnings = res.warnings || [];
     state._jdPreview = res.jd_preview;
+    state._jdText = res.jd_text || jd;
     state._errors = res.errors || [];
+    state.draft = null;   // a new run supersedes any previous draft
     renderContent();
     toast(`Tailored! ${res.diff.length} section(s) changed.${state._errors.length ? ` (${state._errors.length} warning(s))` : ''}`, 'success');
   } catch (e) {
@@ -913,12 +996,38 @@ function renderDiff() {
             <ul class="diff-list">${d.tailored_order.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
           </div>`;
       }
+      // Rewrites are the point of aggressive tailoring — show them first and
+      // in full, old text against new, grouped by company.
+      let rewriteHtml = '';
+      const byCompany = {};
+      (d.rewrites || []).forEach(r => {
+        (byCompany[r.company] = byCompany[r.company] || []).push(r);
+      });
+      Object.keys(byCompany).forEach(company => {
+        rewriteHtml += `
+          <div class="diff-row">
+            <div class="diff-label">${esc(company)} — rewritten</div>
+            ${byCompany[company].map(r => `
+              <div class="rewrite-pair">
+                <div class="rewrite-old">${esc(r.original)}</div>
+                <div class="rewrite-arrow">↓</div>
+                <div class="rewrite-new">${esc(r.tailored)}</div>
+              </div>`).join('')}
+          </div>`;
+      });
+
       let bulletHtml = (d.bullet_changes || []).map(bc => `
-        <div class="diff-row">
-          <div class="diff-label">${esc(bc.company)} — removed bullets</div>
-          ${bc.removed.map(b => `<div class="removed-item">${esc(b)}</div>`).join('')}
-        </div>`).join('');
-      body = `<div class="diff-rows">${orderHtml}${bulletHtml}</div>`;
+        ${bc.removed?.length ? `
+          <div class="diff-row">
+            <div class="diff-label">${esc(bc.company)} — removed bullets</div>
+            ${bc.removed.map(b => `<div class="removed-item">${esc(b)}</div>`).join('')}
+          </div>` : ''}
+        ${bc.added?.length ? `
+          <div class="diff-row">
+            <div class="diff-label">${esc(bc.company)} — new wording</div>
+            ${bc.added.map(b => `<div class="rewrite-new">${esc(b)}</div>`).join('')}
+          </div>` : ''}`).join('');
+      body = `<div class="diff-rows">${rewriteHtml}${orderHtml}${bulletHtml}</div>`;
     } else if (d.section === 'skills') {
       body = `
         <div class="diff-rows">
@@ -947,6 +1056,31 @@ function renderDiff() {
         ${body}
       </div>`;
   }).join('');
+
+  // Seniority read — shown so a wrong detection is visible and correctable.
+  let seniorityHtml = '';
+  if (state._seniority) {
+    const sn = state._seniority;
+    seniorityHtml = `
+      <div class="seniority-panel">
+        <div class="seniority-head">
+          <span class="seniority-badge">${esc(sn.label || '')}</span>
+          <span class="seniority-conf">${esc(sn.confidence || '')} confidence</span>
+        </div>
+        <p class="seniority-signals">Tone and achievement selection matched to this level${
+          sn.signals?.length ? ` — ${esc(sn.signals.join('; '))}` : ''}.</p>
+      </div>`;
+  }
+
+  // Anything the verifier flagged as possibly invented.
+  let warnHtml = '';
+  if (state._warnings?.length) {
+    warnHtml = `
+      <div class="tailor-errors">
+        <div class="tailor-error-item"><strong>Possible fabrication — verify before sending:</strong></div>
+        ${state._warnings.map(w => `<div class="tailor-error-item">⚠️ ${esc(w)}</div>`).join('')}
+      </div>`;
+  }
 
   // Fit analysis panel
   let focusHtml = '';
@@ -1010,34 +1144,29 @@ function renderDiff() {
         </div>
       </div>
       ${state._errors?.length ? `<div class="tailor-errors">${state._errors.map(e => `<div class="tailor-error-item">⚠️ ${esc(e)}</div>`).join('')}</div>` : ''}
+      ${warnHtml}
+      ${seniorityHtml}
       ${focusHtml}
       ${state._jdPreview ? `<div class="jd-preview"><strong>JD preview:</strong> ${esc(state._jdPreview)}…</div>` : ''}
       <div class="mt-3">${blocks}</div>
     </div>`;
 }
 
-async function applyTailored() {
-  if (!state.tailored) return;
-  const role = state._lastRole || 'tailored';
-  const company = state._lastCompany || '';
-  const filename = [role, company].filter(Boolean).join('_').replace(/\s+/g, '_').toLowerCase();
+async function downloadTailoredPDF() {
+  const content = state.draft || (state.tailored ? getMergedProfile() : null);
+  if (!content) return;
+  const role = state.draftMeta?.role || state._lastRole || '';
+  const company = state.draftMeta?.company || state._lastCompany || '';
+
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating…'; }
   try {
-    const res = await fetch('/api/export/pdf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: state.tailored, template: state.selectedTemplate, filename }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${filename}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await exportPDF(content, role, company);
     toast('Tailored PDF downloaded!', 'success');
   } catch (e) {
     toast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '⬇ Download Tailored CV'; }
   }
 }
 
@@ -1073,39 +1202,204 @@ function toggleDiff(i) {
   schedulePreviewRefresh();
 }
 
-async function applySelected() {
+function applySelected() {
   if (!state.tailored) return;
   const accepted = state.tailoredDiff.filter((_, i) => state._diffSelections[i] !== false);
   if (accepted.length === 0) {
     toast('No changes selected — toggle at least one to accept.', '');
     return;
   }
-  const btn = document.getElementById('apply-selected-btn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+
+  // Build the draft from the merged result. The master profile is deliberately
+  // left untouched: a CV trimmed for one job must not become the source for the
+  // next one.
+  state.draft = getMergedProfile();
+  state.draftMeta = {
+    role: state._lastRole || '',
+    company: state._lastCompany || '',
+    seniority: state._seniority || null,
+  };
+
+  state.tailored = null;
+  state.tailoredDiff = [];
+  state._diffSelections = {};
+  state._fit = null;
+
+  renderContent();
+  toast(`Applied ${accepted.length} change(s) — edit your draft below, then export.`, 'success');
+  saveDraft();
+}
+
+// ── Draft: an editable tailored CV, stored separately from the master ──────
+async function saveDraft() {
+  if (!state.draft) return;
   try {
-    // Deep-clone current profile, then overlay each accepted section from tailored
-    const merged = JSON.parse(JSON.stringify(state.profile));
-    for (let i = 0; i < state.tailoredDiff.length; i++) {
-      if (state._diffSelections[i] === false) continue;
-      const section = state.tailoredDiff[i].section;
-      if (state.tailored[section] !== undefined) {
-        merged[section] = JSON.parse(JSON.stringify(state.tailored[section]));
-      }
-    }
-    await api('PUT', '/api/profile', merged);
-    state.profile = merged;
-    state.tailored = null;
-    state.tailoredDiff = [];
-    state._diffSelections = {};
-    state._fit = null;
-    state._errors = [];
-    state.dirty = false;
-    renderContent();
-    toast(`Applied ${accepted.length} change(s) ✓`, 'success');
+    await api('POST', '/api/draft', {
+      content: state.draft,
+      role: state.draftMeta?.role || '',
+      company: state.draftMeta?.company || '',
+    });
+  } catch (_) { /* persistence is a convenience — never block editing on it */ }
+}
+
+let _draftSaveTimer = null;
+function markDraftDirty() {
+  clearTimeout(_draftSaveTimer);
+  _draftSaveTimer = setTimeout(saveDraft, 800);
+  schedulePreviewRefresh();
+}
+
+function updateDraftSummary(val) {
+  if (!state.draft) return;
+  state.draft.summary = val;
+  markDraftDirty();
+}
+
+function updateDraftBullet(ei, bi, val) {
+  const entry = state.draft?.experience?.[ei];
+  if (!entry || !entry.bullets?.[bi]) return;
+  if (typeof entry.bullets[bi] === 'string') entry.bullets[bi] = val;
+  else entry.bullets[bi].text = val;
+  markDraftDirty();
+}
+
+function removeDraftBullet(ei, bi) {
+  state.draft?.experience?.[ei]?.bullets?.splice(bi, 1);
+  markDraftDirty();
+  renderContent();
+}
+
+function updateDraftMetric(i, field, val) {
+  if (!state.draft?.metrics?.[i]) return;
+  state.draft.metrics[i][field] = val;
+  markDraftDirty();
+}
+
+function removeDraftMetric(i) {
+  state.draft?.metrics?.splice(i, 1);
+  markDraftDirty();
+  renderContent();
+}
+
+function discardDraft() {
+  if (!confirm('Discard this tailored draft? Your master CV is unaffected.')) return;
+  state.draft = null;
+  state.draftMeta = null;
+  renderContent();
+  toast('Draft discarded.', '');
+}
+
+function bulletText(b) {
+  return typeof b === 'string' ? b : (b?.text || '');
+}
+
+function renderDraftEditor() {
+  const d = state.draft;
+  const meta = state.draftMeta || {};
+  const target = [meta.role, meta.company].filter(Boolean).join(' · ');
+  const summary = typeof d.summary === 'string' ? d.summary : (d.summary?.default || '');
+
+  const expHtml = (d.experience || []).map((e, ei) => `
+    <div class="draft-entry">
+      <div class="draft-entry-header">
+        <strong>${esc(e.company || '')}</strong>
+        <span class="text-muted">${esc((e.roles || []).map(r => r.title).filter(Boolean).join(', '))}</span>
+      </div>
+      ${(e.bullets || []).map((b, bi) => `
+        <div class="draft-bullet">
+          <textarea rows="2" oninput="updateDraftBullet(${ei},${bi},this.value)"
+                    placeholder="Bullet text">${esc(bulletText(b))}</textarea>
+          <button class="draft-bullet-remove" title="Remove this bullet"
+                  onclick="removeDraftBullet(${ei},${bi})">×</button>
+        </div>`).join('')}
+      ${(e.bullets || []).length === 0 ? '<p class="text-sm text-muted">No bullets kept for this role.</p>' : ''}
+    </div>`).join('');
+
+  const metricsHtml = (d.metrics || []).map((m, i) => `
+    <div class="draft-metric">
+      <input type="text" class="draft-metric-value" value="${esc(m.value || '')}"
+             placeholder="€1.5bn" oninput="updateDraftMetric(${i},'value',this.value)">
+      <input type="text" class="draft-metric-label" value="${esc(m.label || '')}"
+             placeholder="Pipeline generated" oninput="updateDraftMetric(${i},'label',this.value)">
+      <button class="draft-bullet-remove" title="Remove this metric" onclick="removeDraftMetric(${i})">×</button>
+    </div>`).join('');
+
+  return `
+    <div class="draft-editor">
+      <div class="draft-header">
+        <div>
+          <h2 style="font-size:15px;font-weight:600">Tailored draft</h2>
+          ${target ? `<p class="text-sm text-muted">${esc(target)}</p>` : ''}
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="discardDraft()">Discard</button>
+          <button class="btn btn-primary btn-sm" onclick="downloadDraftPDF()">⬇ Export PDF</button>
+        </div>
+      </div>
+
+      <div class="info-box mb-3" style="font-size:12px">
+        Editing here changes this draft only — your master CV in the Edit tab is untouched.
+      </div>
+
+      ${state._warnings?.length ? `
+        <div class="tailor-errors mb-3">
+          <div class="tailor-error-item"><strong>Check these before sending:</strong></div>
+          ${state._warnings.map(w => `<div class="tailor-error-item">⚠️ ${esc(w)}</div>`).join('')}
+        </div>` : ''}
+
+      <div class="draft-section">
+        <label class="draft-label">Summary</label>
+        <textarea rows="5" class="draft-summary" oninput="updateDraftSummary(this.value)"
+                  placeholder="Profile summary">${esc(summary)}</textarea>
+      </div>
+
+      ${(d.metrics || []).length ? `
+        <div class="draft-section">
+          <label class="draft-label">Key metrics</label>
+          ${metricsHtml}
+        </div>` : ''}
+
+      <div class="draft-section">
+        <label class="draft-label">Experience</label>
+        ${expHtml}
+      </div>
+    </div>`;
+}
+
+async function downloadDraftPDF() {
+  if (!state.draft) return;
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating…'; }
+  try {
+    await exportPDF(state.draft, state.draftMeta?.role || '', state.draftMeta?.company || '');
+    toast('Tailored PDF downloaded!', 'success');
   } catch (e) {
     toast(e.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = `Apply ${accepted.length} of ${state.tailoredDiff.length} →`; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '⬇ Export PDF'; }
   }
+}
+
+// Shared PDF download path — the server names the file from role + company.
+async function exportPDF(content, role = '', company = '') {
+  const res = await fetch('/api/export/pdf', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, template: state.selectedTemplate, role, company }),
+  });
+  if (!res.ok) throw new Error(await res.text() || 'Export failed');
+
+  const blob = await res.blob();
+  const disposition = res.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  const filename = match ? decodeURIComponent(match[1]) : 'cv.pdf';
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function gotoSection(section) {
@@ -1125,6 +1419,7 @@ let _previewDebounce = null;
 
 function getMergedProfile() {
   // Build the "as-if-applied" profile: original + accepted tailored sections
+  if (!state.tailored) return JSON.parse(JSON.stringify(state.draft || state.profile));
   const merged = JSON.parse(JSON.stringify(state.profile));
   for (let i = 0; i < state.tailoredDiff.length; i++) {
     if (state._diffSelections[i] === false) continue;
@@ -1142,7 +1437,7 @@ function schedulePreviewRefresh() {
 }
 
 async function refreshPreview() {
-  if (!state.tailored) return;
+  if (!state.tailored && !state.draft) return;
   const loading = document.getElementById('preview-loading');
   const frame = document.getElementById('cv-preview-frame');
   if (!frame) return;
@@ -1150,8 +1445,8 @@ async function refreshPreview() {
   if (loading) loading.style.display = 'flex';
 
   try {
-    const merged = getMergedProfile();
-    const res = await api('POST', '/api/preview', { content: merged, template: state.selectedTemplate });
+    const content = state.draft ? state.draft : getMergedProfile();
+    const res = await api('POST', '/api/preview', { content, template: state.selectedTemplate });
     const doc = frame.contentDocument || frame.contentWindow?.document;
     if (doc) {
       // Write HTML; onload fires after render, then we scale
@@ -1169,22 +1464,333 @@ async function refreshPreview() {
 }
 
 function scalePreviewFrame() {
-  const wrapper = document.getElementById('preview-frame-wrapper');
-  const frame = document.getElementById('cv-preview-frame');
+  scaleFrame('preview-frame-wrapper', 'cv-preview-frame');
+}
+
+// Scale a rendered A4 page down to fit whichever preview pane holds it.
+function scaleFrame(wrapperId, frameId) {
+  const wrapper = document.getElementById(wrapperId);
+  const frame = document.getElementById(frameId);
   if (!wrapper || !frame) return;
   const containerW = wrapper.clientWidth;
   if (!containerW) return;
-  // CV templates render at 900px natural width; scale to fit panel
+
+  // CV and letter templates both render at 900px natural width.
   const CV_W = 900;
   const scale = Math.min(1, (containerW - 2) / CV_W);
-  // Use scrollHeight if available (iframe fully loaded), else fixed A4×2 height
   const body = frame.contentDocument?.body;
   const naturalH = (body && body.scrollHeight > 100) ? body.scrollHeight : 2200;
+
   frame.style.width = CV_W + 'px';
   frame.style.height = naturalH + 'px';
   frame.style.transform = `scale(${scale})`;
   frame.style.transformOrigin = 'top left';
-  // Don't override wrapper height — it's set by CSS to fill the panel
+}
+
+// ── Cover letter tab ──────────────────────────────────────────────────────
+const COVER_TONES = {
+  executive: 'Executive', warm: 'Warm', direct: 'Direct',
+};
+const COVER_LENGTHS = {
+  short: '~250 words', medium: '~350 words', long: '~450 words',
+};
+
+function renderCoverTab() {
+  const has = !!state.cover;
+  const formCard = `
+    <div class="card ${has ? 'mb-3' : 'mb-4'}">
+      <div class="card-header" style="cursor:pointer;user-select:none" onclick="toggleCoverForm()">
+        <h2 style="pointer-events:none">Write a Cover Letter</h2>
+        <span id="cover-form-chevron" style="font-size:11px;color:var(--text-muted)">${has ? '▶ expand' : '▼'}</span>
+      </div>
+      <div class="card-body" id="cover-form-body" style="${has ? 'display:none' : ''}">
+        <div class="form-grid cols-1 mb-2">
+          <div class="form-group">
+            <label>Job Posting URL <span class="text-muted">(optional)</span></label>
+            <input type="url" id="c-url" value="${esc(state._coverUrl || state._lastUrl || '')}" placeholder="https://company.com/jobs/role">
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Role</label>
+            <input type="text" id="c-role" value="${esc(state._coverRole ?? state._lastRole ?? '')}" placeholder="VP of Marketing">
+          </div>
+          <div class="form-group">
+            <label>Company</label>
+            <input type="text" id="c-company" value="${esc(state._coverCompany ?? state._lastCompany ?? '')}" placeholder="Acme Corp">
+          </div>
+          <div class="form-group span-2">
+            <label>Job Description Text</label>
+            <textarea id="c-jd" rows="4" placeholder="Paste the job description — the more detail, the more specific the letter.">${esc(state._coverJD ?? state._jdText ?? state._lastJD ?? '')}</textarea>
+          </div>
+        </div>
+        <div class="flex gap-3 mt-3" style="align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="margin:0;min-width:150px">
+            <label style="font-size:11px">Tone</label>
+            <select id="c-tone" onchange="state._coverTone=this.value">
+              ${Object.entries(COVER_TONES).map(([k, v]) =>
+                `<option value="${k}" ${state._coverTone === k ? 'selected' : ''}>${v}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0;min-width:150px">
+            <label style="font-size:11px">Length</label>
+            <select id="c-length" onchange="state._coverLength=this.value">
+              ${Object.entries(COVER_LENGTHS).map(([k, v]) =>
+                `<option value="${k}" ${state._coverLength === k ? 'selected' : ''}>${v}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0;min-width:170px">
+            <label style="font-size:11px">Seniority</label>
+            <select id="c-seniority" onchange="state._coverSeniority=this.value">
+              <option value="">Auto-detect</option>
+              ${Object.entries(SENIORITY_LABELS).map(([k, v]) =>
+                `<option value="${k}" ${state._coverSeniority === k ? 'selected' : ''}>${v}</option>`).join('')}
+            </select>
+          </div>
+          <div class="provider-seg">
+            ${['auto','anthropic','openai'].map(pr => `<button class="seg-btn ${state.provider === pr ? 'active' : ''}" onclick="setProvider('${pr}')">${pr === 'auto' ? 'Auto' : pr === 'anthropic' ? 'Anthropic' : 'OpenAI'}</button>`).join('')}
+          </div>
+          <button class="btn btn-primary" id="cover-btn" onclick="runCoverLetter()">✉️ Write Letter</button>
+        </div>
+      </div>
+    </div>`;
+
+  if (!has) {
+    return `
+      <div class="tailor-panel">
+        ${formCard}
+        <div class="empty-state">
+          <div class="empty-icon">✉️</div>
+          <h3>No letter yet</h3>
+          <p>Paste a job description and generate a letter matched to it. Every claim comes from your CV.</p>
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="tailor-panel">
+      ${formCard}
+      <div class="tailor-results-split">
+        <div class="tailor-left-panel">
+          ${renderCoverEditor()}
+        </div>
+        <div class="tailor-right-panel">
+          <div class="preview-toolbar">
+            <span class="preview-title">Letter Preview</span>
+            <span class="preview-template">${esc(state.selectedTemplate)}</span>
+            <span class="preview-hint">Updates as you type</span>
+          </div>
+          <div class="preview-loading" id="cover-preview-loading">
+            <span class="spinner"></span> Rendering…
+          </div>
+          <div class="preview-frame-wrapper" id="cover-frame-wrapper">
+            <iframe id="cover-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderCoverEditor() {
+  const c = state.cover;
+  const target = [c.target?.role, c.target?.company].filter(Boolean).join(' · ');
+
+  return `
+    <div class="draft-editor">
+      <div class="draft-header">
+        <div>
+          <h2 style="font-size:15px;font-weight:600">Cover letter</h2>
+          ${target ? `<p class="text-sm text-muted">${esc(target)}</p>` : ''}
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="runCoverLetter()">↻ Regenerate</button>
+          <button class="btn btn-primary btn-sm" onclick="downloadCoverPDF()">⬇ Export PDF</button>
+        </div>
+      </div>
+
+      ${state._coverErrors?.length ? `
+        <div class="tailor-errors mb-3">
+          ${state._coverErrors.map(e => `<div class="tailor-error-item">⚠️ ${esc(e)}</div>`).join('')}
+        </div>` : ''}
+
+      ${state._coverWarnings?.length ? `
+        <div class="tailor-errors mb-3">
+          <div class="tailor-error-item"><strong>Possible fabrication — verify before sending:</strong></div>
+          ${state._coverWarnings.map(w => `<div class="tailor-error-item">⚠️ ${esc(w)}</div>`).join('')}
+        </div>` : ''}
+
+      ${c.seniority ? `
+        <div class="seniority-panel mb-3">
+          <div class="seniority-head">
+            <span class="seniority-badge">${esc(c.seniority.label || '')}</span>
+            <span class="seniority-conf">${esc(c.seniority.confidence || '')} confidence</span>
+          </div>
+        </div>` : ''}
+
+      <div class="draft-section">
+        <label class="draft-label">Salutation</label>
+        <input type="text" class="draft-metric-label" value="${esc(c.salutation || '')}"
+               oninput="updateCoverField('salutation', this.value)">
+      </div>
+
+      <div class="draft-section">
+        <label class="draft-label">Body</label>
+        ${(c.paragraphs || []).map((para, i) => `
+          <div class="draft-bullet">
+            <textarea rows="4" oninput="updateCoverParagraph(${i}, this.value)">${esc(para)}</textarea>
+            <button class="draft-bullet-remove" title="Remove paragraph"
+                    onclick="removeCoverParagraph(${i})">×</button>
+          </div>`).join('')}
+        <button class="btn btn-secondary btn-sm mt-2" onclick="addCoverParagraph()">+ Add paragraph</button>
+      </div>
+
+      <div class="draft-section">
+        <label class="draft-label">Closing</label>
+        <textarea rows="3" class="draft-summary"
+                  oninput="updateCoverField('closing', this.value)">${esc(c.closing || '')}</textarea>
+      </div>
+
+      <div class="draft-section">
+        <label class="draft-label">Sign-off</label>
+        <input type="text" class="draft-metric-label" value="${esc(c.signoff || '')}"
+               oninput="updateCoverField('signoff', this.value)">
+      </div>
+    </div>`;
+}
+
+function toggleCoverForm() {
+  const body = document.getElementById('cover-form-body');
+  const chevron = document.getElementById('cover-form-chevron');
+  if (!body) return;
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  if (chevron) chevron.textContent = hidden ? '▼' : '▶ expand';
+}
+
+function updateCoverField(field, val) {
+  if (!state.cover) return;
+  state.cover[field] = val;
+  scheduleCoverRefresh();
+}
+
+function updateCoverParagraph(i, val) {
+  if (!state.cover?.paragraphs) return;
+  state.cover.paragraphs[i] = val;
+  scheduleCoverRefresh();
+}
+
+function removeCoverParagraph(i) {
+  state.cover?.paragraphs?.splice(i, 1);
+  renderContent();
+}
+
+function addCoverParagraph() {
+  if (!state.cover) return;
+  (state.cover.paragraphs = state.cover.paragraphs || []).push('');
+  renderContent();
+}
+
+async function runCoverLetter() {
+  const btn = document.getElementById('cover-btn') || event?.target;
+  const read = id => document.getElementById(id)?.value.trim();
+
+  const url = read('c-url') ?? state._coverUrl ?? '';
+  const role = read('c-role') ?? state._coverRole ?? '';
+  const company = read('c-company') ?? state._coverCompany ?? '';
+  const jd = read('c-jd') ?? state._coverJD ?? '';
+
+  if (!role && !url && !jd) {
+    toast('Enter a role, URL, or job description first.', 'error');
+    return;
+  }
+
+  state._coverUrl = url; state._coverRole = role;
+  state._coverCompany = company; state._coverJD = jd;
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Writing…'; }
+  try {
+    const res = await api('POST', '/api/cover-letter', {
+      url, jd_text: jd, role, company,
+      tone: state._coverTone, length: state._coverLength,
+      provider: state.provider, seniority: state._coverSeniority || '',
+    });
+    state.cover = res.letter;
+    state.coverMeta = { role, company };
+    state._coverWarnings = res.warnings || [];
+    state._coverErrors = res.errors || [];
+    renderContent();
+    toast('Cover letter ready — edit it below.', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '✉️ Write Letter'; }
+  }
+}
+
+let _coverDebounce = null;
+function scheduleCoverRefresh() {
+  clearTimeout(_coverDebounce);
+  _coverDebounce = setTimeout(refreshCoverPreview, 250);
+}
+
+async function refreshCoverPreview() {
+  if (!state.cover) return;
+  const loading = document.getElementById('cover-preview-loading');
+  const frame = document.getElementById('cover-preview-frame');
+  if (!frame) return;
+  if (loading) loading.style.display = 'flex';
+
+  try {
+    const res = await api('POST', '/api/cover-letter/preview', {
+      letter: state.cover, template: state.selectedTemplate,
+    });
+    const doc = frame.contentDocument || frame.contentWindow?.document;
+    if (doc) {
+      frame.onload = () => {
+        scaleFrame('cover-frame-wrapper', 'cover-preview-frame');
+        if (loading) loading.style.display = 'none';
+      };
+      doc.open();
+      doc.write(res.html);
+      doc.close();
+    }
+  } catch (_) {
+    if (loading) loading.style.display = 'none';
+  }
+}
+
+async function downloadCoverPDF() {
+  if (!state.cover) return;
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating…'; }
+  try {
+    const res = await fetch('/api/export/cover-letter/pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        letter: state.cover, template: state.selectedTemplate,
+        role: state.coverMeta?.role || '', company: state.coverMeta?.company || '',
+      }),
+    });
+    if (!res.ok) throw new Error('Export failed');
+
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition') || '';
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    const filename = match ? decodeURIComponent(match[1]) : 'cover_letter.pdf';
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Cover letter downloaded!', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '⬇ Export PDF'; }
+  }
 }
 
 // ── Settings tab ──────────────────────────────────────────────────────────
@@ -1279,12 +1885,17 @@ function renderExportTab() {
             <button class="btn btn-primary" onclick="exportMasterPDF()">
               ⬇ Download Base CV (${state.selectedTemplate})
             </button>
-            ${state.tailored ? `
-              <button class="btn btn-secondary" onclick="applyTailored()">
+            ${(state.tailored || state.draft) ? `
+              <button class="btn btn-secondary" onclick="downloadTailoredPDF()">
                 ⬇ Download Tailored CV
               </button>` : ''}
+            ${state.cover ? `
+              <button class="btn btn-secondary" onclick="downloadCoverPDF()">
+                ⬇ Download Cover Letter
+              </button>` : ''}
           </div>
-          ${state.tailored ? '' : `<p class="text-sm text-muted mt-2">Go to the Tailor tab to generate a tailored version for a specific role.</p>`}
+          ${!state.tailored && !state.draft ? `<p class="text-sm text-muted mt-2">Go to the Tailor tab to generate a tailored version for a specific role.</p>` : ''}
+          ${state.draft ? `<p class="text-sm text-muted mt-2">Exports are named for the role and company you tailored to.</p>` : ''}
         </div>
       </div>
     </div>`;
@@ -1301,20 +1912,7 @@ async function exportMasterPDF() {
   btn.innerHTML = '<span class="spinner"></span> Generating…';
   try {
     collectFormData();
-    const name = (state.profile?.meta?.name || 'cv').replace(/\s+/g, '_').toLowerCase();
-    const res = await fetch('/api/export/pdf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: state.profile, template: state.selectedTemplate, filename: name }),
-    });
-    if (!res.ok) throw new Error('Export failed');
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${name}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await exportPDF(state.profile);
     toast('PDF downloaded!', 'success');
   } catch (e) {
     toast(e.message, 'error');

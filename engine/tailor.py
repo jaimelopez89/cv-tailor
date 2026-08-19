@@ -10,17 +10,25 @@ from collections import Counter
 
 import yaml
 
+from engine.metrics import normalize_metric, renderable_metrics
+from engine.seniority import detect_seniority, tone_instructions, tone_profile
 
-def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = False,
-           provider: str = "auto") -> tuple[dict, list[str]]:
+MODEL = "claude-opus-5"
+
+
+def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = True,
+           provider: str = "auto", recommendations: list = None,
+           seniority: dict = None) -> tuple[dict, list[str]]:
     """Main entry: load master profile, tailor for target, return (content, errors).
 
     Args:
         master_path: Path to master_profile.yaml
         target: Dict with company, role, emphasis (list of strings), jd_text (optional)
         ai: Use AI tailoring when a key is available
-        rewrite: Allow AI to rewrite bullets (only with ai=True)
+        rewrite: Rewrite bullets aggressively (default). False = select/reorder only.
         provider: "auto" | "anthropic" | "openai" — which LLM provider to use
+        recommendations: Fit-analysis recommendations for the model to act on
+        seniority: Detected seniority dict; computed from the target when omitted
     Returns:
         (tailored_content, errors) where errors is a list of human-readable strings
     """
@@ -28,6 +36,9 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Fal
         master = yaml.safe_load(f)
 
     errors = []
+    if seniority is None:
+        seniority = detect_seniority(target.get("role", ""), target.get("jd_text", ""))
+    recommendations = recommendations or []
 
     if ai:
         use_anthropic = provider in ("auto", "anthropic") and os.environ.get("ANTHROPIC_API_KEY")
@@ -42,16 +53,18 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Fal
 
         if use_anthropic:
             try:
-                return _resolve_summary(_ai_tailor(master, target, rewrite), master, target), errors
+                return _finish(_ai_tailor(master, target, rewrite, recommendations, seniority),
+                               master, target, seniority), errors
             except Exception as e:
                 if provider == "anthropic":
                     errors.append(f"Anthropic tailoring failed: {e}")
-                    return _deterministic_tailor(master, target), errors
+                    return _deterministic_tailor(master, target, seniority), errors
                 # auto mode: silently try next provider
 
         if use_openai:
             try:
-                return _resolve_summary(_openai_tailor(master, target, rewrite), master, target), errors
+                return _finish(_openai_tailor(master, target, rewrite, recommendations, seniority),
+                               master, target, seniority), errors
             except Exception as e:
                 if provider == "openai":
                     errors.append(f"OpenAI tailoring failed: {e}")
@@ -62,19 +75,27 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Fal
         elif errors:
             errors.append("Fell back to keyword-based tailoring.")
 
-    return _deterministic_tailor(master, target), errors
+    return _deterministic_tailor(master, target, seniority), errors
 
 
-def _resolve_summary(content: dict, master: dict, target: dict) -> dict:
-    """If AI returned summary as a dict (copied from master), resolve it to a string."""
+def _finish(content: dict, master: dict, target: dict, seniority: dict) -> dict:
+    """Normalise an AI response: resolve the summary, clean metrics, tag seniority."""
     if isinstance(content.get("summary"), dict):
         target_tags = _extract_tags(target.get("emphasis", []), target.get("jd_text", ""))
         content["summary"] = _select_summary(master.get("summary", {}), target_tags)
+
+    # Metrics must always reach the template with value/label populated.
+    content["metrics"] = renderable_metrics(content.get("metrics") or master.get("metrics", []))
+
+    content["_seniority"] = seniority
     return content
 
 
-def _deterministic_tailor(master: dict, target: dict) -> dict:
+def _deterministic_tailor(master: dict, target: dict, seniority: dict = None) -> dict:
     """Tag-based scoring to select and order content."""
+    if seniority is None:
+        seniority = detect_seniority(target.get("role", ""), target.get("jd_text", ""))
+    profile = tone_profile(seniority["level"])
     content = copy.deepcopy(master)
     emphasis = target.get("emphasis", [])
     jd_text = target.get("jd_text", "")
@@ -85,15 +106,15 @@ def _deterministic_tailor(master: dict, target: dict) -> dict:
     # Summary: pick best variant or default
     content["summary"] = _select_summary(master.get("summary", {}), target_tags)
 
-    # Metrics: score by tag overlap, keep top 4
-    metrics = master.get("metrics", [])
+    # Metrics: normalise, score by tag overlap, keep top 4 that can actually render
     scored_metrics = []
-    for m in metrics:
+    for raw in master.get("metrics", []):
+        m = normalize_metric(raw)
         overlap = len(set(m.get("tags", [])) & target_tags)
         score = m.get("weight", 5) * (1 + overlap)
         scored_metrics.append((score, m))
     scored_metrics.sort(key=lambda x: x[0], reverse=True)
-    content["metrics"] = [m for _, m in scored_metrics[:4]]
+    content["metrics"] = renderable_metrics([m for _, m in scored_metrics])
 
     # Experience: score bullets, keep top N per entry, reorder entries
     experience = master.get("experience", [])
@@ -109,7 +130,7 @@ def _deterministic_tailor(master: dict, target: dict) -> dict:
             scored_bullets.append((score, b))
         scored_bullets.sort(key=lambda x: x[0], reverse=True)
 
-        max_bullets = 5
+        max_bullets = profile["bullets_per_role"]
         entry_copy["bullets"] = [b for _, b in scored_bullets[:max_bullets]]
 
         # Entry score = max bullet score
@@ -142,6 +163,7 @@ def _deterministic_tailor(master: dict, target: dict) -> dict:
 
     # Pass through: ventures, education, notable (no filtering)
     content["_target"] = target
+    content["_seniority"] = seniority
     return content
 
 
@@ -203,8 +225,92 @@ def _extract_tags(emphasis: list, jd_text: str) -> set:
     return tags
 
 
-def _ai_tailor(master: dict, target: dict, rewrite: bool = False) -> dict:
-    """Use Claude API for intelligent tailoring."""
+def _shared_rules(target: dict, rewrite: bool, recommendations: list, seniority: dict) -> str:
+    """The tailoring contract shared by both providers."""
+    target_desc = f"Company: {target.get('company', 'Unknown')}\n"
+    target_desc += f"Role: {target.get('role', 'Unknown')}\n"
+    if target.get("emphasis"):
+        target_desc += f"Emphasis: {', '.join(target['emphasis'])}\n"
+    if target.get("jd_text"):
+        target_desc += f"\nJob Description:\n{target['jd_text'][:6000]}\n"
+
+    if rewrite:
+        rewrite_block = """REWRITING — BE AGGRESSIVE. This is the most important instruction.
+Rewrite EVERY bullet you keep. A bullet that comes back unchanged is a failure
+unless it was already perfectly matched to this job.
+
+For each bullet:
+- Lead with the OUTCOME, not the activity. "Built X" is weak; "Grew pipeline
+  3x by building X" is right.
+- Re-express it in the job description's OWN vocabulary. If the JD says
+  "go-to-market", do not say "commercial launch". Mirror their words.
+- Cut throat-clearing, hedges, and any clause that does not earn its place.
+- Front-load the words that matter to this employer; a recruiter reads the
+  first six words of each line and no more.
+- Aim for one line, never more than two.
+
+WHAT YOU MUST NOT CHANGE — these are load-bearing facts:
+- Every number, percentage, currency amount, and multiple, exactly as written.
+- Every company name, product name, technology, and person's title.
+- Every date and time period.
+- The nature of your involvement. If the source says "contributed to", you may
+  not upgrade it to "led". If it says "supported", it is not "owned".
+Rewriting means re-expressing what is there with sharper words and a better
+order. It never means adding, inflating, or implying something new."""
+    else:
+        rewrite_block = ("REWRITING — DISABLED. Select and reorder only. "
+                         "Reproduce bullet text exactly as it appears in the master profile.")
+
+    rec_block = ""
+    if recommendations:
+        lines = []
+        for r in recommendations:
+            if isinstance(r, dict):
+                where = r.get("location") or r.get("section") or "profile"
+                lines.append(f"- [{where}] {r.get('suggestion', '')}".rstrip())
+                if r.get("draft"):
+                    lines.append(f"    suggested wording: {r['draft']}")
+            elif r:
+                lines.append(f"- {r}")
+        if lines:
+            rec_block = (
+                "\nRECOMMENDATIONS TO CARRY OUT\n"
+                "A fit analysis of this job produced the notes below. Act on them — they are\n"
+                "instructions, not suggestions. Where one proposes wording, use it (adjusted to\n"
+                "fit the surrounding text). Where it identifies a gap you cannot fill from the\n"
+                "profile, reorder to foreground the closest genuine evidence instead. Never\n"
+                "invent content to satisfy a recommendation.\n" + "\n".join(lines) + "\n"
+            )
+
+    return f"""TARGET:
+{target_desc}
+{tone_instructions(seniority['level'])}
+{rec_block}
+{rewrite_block}
+
+NO FABRICATION — the hard boundary:
+Every fact, metric, employer, technology, and claim in your output must exist in
+the master profile. You may re-word, re-order, re-frame, and cut. You may not add.
+If the profile lacks relevant material for something the job wants, leave that
+area thin. A sparse honest CV beats an padded one, and invented content is
+caught by an automated check that will reject your output.
+
+TASKS:
+1. Write the summary for THIS job at the seniority register above, using only
+   facts from the profile. Rewrite it — do not just pick a variant verbatim.
+2. Keep the strongest bullets per experience entry (see the seniority limit) and
+   rewrite each one per the rules above.
+3. Reorder experience entries to lead with the most relevant.
+4. Choose the metrics that matter most to this employer. Each needs a short
+   `value` (the figure, e.g. "EUR 1.5bn") and a short `label` of 2-4 words.
+   Never emit a metric with an empty value or label.
+5. Reorder skill groups to lead with the most relevant.
+6. Keep only the speaking entries that support this application."""
+
+
+def _ai_tailor(master: dict, target: dict, rewrite: bool = True,
+               recommendations: list = None, seniority: dict = None) -> dict:
+    """Use the Claude API for intelligent tailoring."""
     import anthropic
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -212,64 +318,41 @@ def _ai_tailor(master: dict, target: dict, rewrite: bool = False) -> dict:
         raise ValueError("ANTHROPIC_API_KEY not set")
 
     client = anthropic.Anthropic(api_key=api_key)
-
     master_yaml = yaml.dump(master, default_flow_style=False, allow_unicode=True)
-    target_desc = f"Company: {target.get('company', 'Unknown')}\n"
-    target_desc += f"Role: {target.get('role', 'Unknown')}\n"
-    if target.get("emphasis"):
-        target_desc += f"Emphasis: {', '.join(target['emphasis'])}\n"
-    if target.get("jd_text"):
-        target_desc += f"\nJob Description:\n{target['jd_text']}\n"
 
-    rewrite_instruction = ""
-    if rewrite:
-        rewrite_instruction = """- You MAY rewrite bullet text to better position for the role, but preserve
-  all factual claims, metrics, and specificity. Never invent achievements."""
-    else:
-        rewrite_instruction = """- Do NOT rewrite bullets. Select and reorder only. Use exact original text."""
+    prompt = f"""Tailor this CV for the target role.
 
-    prompt = f"""Given this master career profile and target role, produce a tailored content YAML.
-
-CRITICAL RULE — NO FABRICATION:
-- Every fact, metric, bullet, and claim in the output MUST come from the master profile below.
-- NEVER invent achievements, metrics, company descriptions, or any content not in the source.
-- You may ONLY select, reorder, and (if --rewrite is set) rephrase existing content.
-- If the master profile lacks relevant content for an area, leave it sparse — do not fill gaps.
-
-TARGET:
-{target_desc}
+{_shared_rules(target, rewrite, recommendations or [], seniority)}
 
 MASTER PROFILE:
 {master_yaml}
 
-INSTRUCTIONS:
-1. Select the best summary variant for this role (or use default). If rewrite is allowed,
-   you may adjust phrasing but ONLY using facts from the profile.
-2. Select and reorder the 3-5 strongest bullets per experience entry for this target.
-3. Reorder experience entries to lead with most relevant.
-4. Select top 4 metrics most relevant to this role.
-5. Reorder skill groups to lead with most relevant.
-6. Select most relevant speaking entries.
-{rewrite_instruction}
-
-Return ONLY valid YAML matching this exact structure (no markdown fences):
+Return ONLY valid YAML (no markdown fences) with these top-level keys:
 meta: (copy from master exactly — do not alter)
-summary: "selected/refined summary text"
-metrics: (list of value/label dicts — from master only)
-experience: (list of entries with company/subtitle/roles/bullets — from master only)
+summary: "rewritten summary text"
+metrics: (list of {{value, label, tags, weight}} dicts)
+experience: (list of entries with company/subtitle/location/roles/bullets)
 ventures: (copy from master exactly)
 education: (copy from master exactly)
-skills: (groups list — from master only)
-speaking: (filtered list — from master only)
+skills: (groups list)
+speaking: (filtered list)
 notable: (copy from master exactly)"""
 
-    message = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=4000,
+    with client.messages.stream(
+        model=MODEL,
+        max_tokens=32000,
+        thinking={"type": "adaptive"},
+        output_config={"effort": "high"},
+        system="You are an expert CV editor. Return only YAML. Rewrite aggressively "
+               "for the target role while never altering a fact.",
         messages=[{"role": "user", "content": prompt}],
-    )
+    ) as stream:
+        message = stream.get_final_message()
 
-    response_text = message.content[0].text.strip()
+    if message.stop_reason == "refusal":
+        raise ValueError("Request was declined by the safety system.")
+
+    response_text = "".join(b.text for b in message.content if b.type == "text").strip()
 
     # Strip markdown fences if present
     if response_text.startswith("```"):
@@ -285,8 +368,9 @@ notable: (copy from master exactly)"""
     return content
 
 
-def _openai_tailor(master: dict, target: dict, rewrite: bool = False) -> dict:
-    """Use OpenAI gpt-4o-mini for intelligent tailoring (JSON output to avoid YAML parse issues)."""
+def _openai_tailor(master: dict, target: dict, rewrite: bool = True,
+                   recommendations: list = None, seniority: dict = None) -> dict:
+    """Use OpenAI gpt-4o-mini for tailoring (JSON output to avoid YAML parse issues)."""
     import json
     from openai import OpenAI
 
@@ -298,50 +382,29 @@ def _openai_tailor(master: dict, target: dict, rewrite: bool = False) -> dict:
 
     # Send master as JSON (avoids YAML colon ambiguity in the prompt)
     master_json = json.dumps(master, ensure_ascii=False, indent=2)
-    target_desc = f"Company: {target.get('company', 'Unknown')}\n"
-    target_desc += f"Role: {target.get('role', 'Unknown')}\n"
-    if target.get("emphasis"):
-        target_desc += f"Emphasis: {', '.join(target['emphasis'])}\n"
-    if target.get("jd_text"):
-        target_desc += f"\nJob Description:\n{target['jd_text'][:2000]}\n"
 
-    rewrite_instruction = (
-        "You MAY rewrite bullet text to better position for the role, but preserve "
-        "all factual claims, metrics, and specificity. Never invent achievements."
-        if rewrite else
-        "Do NOT rewrite bullets. Select and reorder only. Use exact original text."
-    )
-
-    system_msg = (
-        "You are an expert CV editor. Return only a JSON object — no markdown, no explanation. "
-        "Every fact in the output must come from the master profile. Never fabricate content."
-    )
     user_msg = f"""Tailor this CV for the target role.
 
-TARGET:
-{target_desc}
+{_shared_rules(target, rewrite, recommendations or [], seniority)}
 
 MASTER PROFILE (JSON):
 {master_json}
 
-INSTRUCTIONS:
-1. Select the best summary variant or use default.
-2. Select and reorder 3-5 strongest bullets per experience entry for this role.
-3. Reorder experience entries to lead with most relevant.
-4. Select top 4 metrics most relevant to this role.
-5. Reorder skill groups to lead with most relevant.
-6. Select most relevant speaking entries.
-7. {rewrite_instruction}
-
-Return a JSON object with these exact top-level keys (copy unchanged sections verbatim from master):
-meta, summary, metrics, experience, ventures, education, skills, speaking, notable"""
+Return a JSON object with these exact top-level keys (copy unchanged sections
+verbatim from master): meta, summary, metrics, experience, ventures, education,
+skills, speaking, notable.
+Each metric must be {{"value": "...", "label": "...", "tags": [...], "weight": N}}
+with both value and label non-empty."""
 
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=4000,
+        max_tokens=8000,
         response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": system_msg},
+            {"role": "system", "content":
+                "You are an expert CV editor. Return only a JSON object. Rewrite bullets "
+                "aggressively for the target role, but every fact — numbers, companies, "
+                "dates, technologies — must come from the master profile unchanged."},
             {"role": "user", "content": user_msg},
         ],
     )

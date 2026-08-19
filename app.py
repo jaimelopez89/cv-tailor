@@ -25,9 +25,11 @@ DATA_DIR = BASE_DIR / "data"
 MASTER_PROFILE = DATA_DIR / "master_profile.yaml"
 OUTPUT_DIR = DATA_DIR / "output"
 SETTINGS_FILE = DATA_DIR / "settings.yaml"
+DRAFTS_DIR = DATA_DIR / "drafts"
 
 DATA_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
+DRAFTS_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
 
 # ── SSL context (fixes macOS certificate issues) ──────────────────────────────
@@ -45,14 +47,42 @@ class TailorRequest(BaseModel):
     company: str = ""
     emphasis: list[str] = []
     use_ai: bool = True
-    rewrite: bool = False
+    rewrite: bool = True
     provider: str = "auto"  # "auto" | "anthropic" | "openai"
+    seniority: str = ""     # override the detected level
 
 
 class ExportRequest(BaseModel):
     content: Optional[dict] = None  # None = use master
     template: str = "ember"
     filename: str = "cv"
+    role: str = ""
+    company: str = ""
+
+
+class DraftRequest(BaseModel):
+    content: dict
+    role: str = ""
+    company: str = ""
+
+
+class CoverLetterRequest(BaseModel):
+    url: str = ""
+    jd_text: str = ""
+    role: str = ""
+    company: str = ""
+    tone: str = "executive"
+    length: str = "medium"
+    provider: str = "auto"
+    seniority: str = ""
+
+
+class CoverLetterRenderRequest(BaseModel):
+    letter: dict
+    template: str = "ember"
+    filename: str = "cover_letter"
+    role: str = ""
+    company: str = ""
 
 
 class SettingsModel(BaseModel):
@@ -167,27 +197,71 @@ def tailor_cv(req: TailorRequest):
     if url_warning:
         errors.append(url_warning)
 
+    # Seniority first — it steers both the analysis and the rewrite.
+    from engine.seniority import detect_seniority, tone_profile
+    seniority = detect_seniority(req.role, jd_text)
+    if req.seniority:
+        seniority = {
+            "level": req.seniority,
+            "label": tone_profile(req.seniority)["label"],
+            "confidence": "user-set",
+            "signals": ["level set manually"],
+        }
+
+    # Fit analysis runs BEFORE tailoring so its recommendations become
+    # instructions the tailor carries out, rather than advice shown on the side.
+    fit, fit_errors = _analyze_fit(master, jd_text, req.emphasis, req.role, req.company, req.provider)
+    errors.extend(fit_errors)
+
     try:
         from engine.tailor import tailor
         tailored, tailor_errors = tailor(
             str(MASTER_PROFILE), target,
             ai=req.use_ai, rewrite=req.rewrite, provider=req.provider,
+            recommendations=fit.get("recommendations", []),
+            seniority=seniority,
         )
         errors.extend(tailor_errors)
     except Exception as e:
         raise HTTPException(500, f"Tailoring failed: {e}")
 
+    # Guard against invented facts before anything reaches the preview.
+    from engine.verify import verify_content
+    warnings = verify_content(master, tailored)
+
     diff = _compute_diff(master, tailored)
-    fit, fit_errors = _analyze_fit(master, jd_text, req.emphasis, req.role, req.company, req.provider)
-    errors.extend(fit_errors)
 
     return {
         "tailored": tailored,
         "diff": diff,
         "fit": fit,
+        "seniority": seniority,
+        "warnings": warnings,
         "jd_preview": jd_text[:500] if jd_text else "",
+        "jd_text": jd_text,
+        "url_warning": url_warning,
         "errors": errors,
     }
+
+
+def _slug(text: str, limit: int = 60) -> str:
+    """Filesystem-safe slug preserving word boundaries with underscores."""
+    import re
+    text = re.sub(r"[^\w\s-]", "", str(text or ""), flags=re.UNICODE).strip()
+    text = re.sub(r"[\s_-]+", "_", text).strip("_")
+    return text[:limit].strip("_")
+
+
+def _safe_filename(name: str = "", role: str = "", company: str = "",
+                   kind: str = "", fallback: str = "cv") -> str:
+    """Build an export filename: Name_-_Kind_-_Role_-_Company.
+
+    Empty parts drop out, so a base CV export is just the name and a tailored
+    one carries the role and company it was written for.
+    """
+    parts = [_slug(name), _slug(kind), _slug(role), _slug(company)]
+    parts = [p for p in parts if p]
+    return "_-_".join(parts) if parts else fallback
 
 
 # ── Export ────────────────────────────────────────────────────────────────────
@@ -201,7 +275,11 @@ def export_pdf(req: ExportRequest):
     else:
         content = req.content
 
-    safe_name = req.filename.replace(" ", "_").replace("/", "_")
+    name = (content.get("meta") or {}).get("name", "")
+    if req.role or req.company:
+        safe_name = _safe_filename(name, req.role, req.company)
+    else:
+        safe_name = _safe_filename(name) or _slug(req.filename) or "cv"
     out_path = str(OUTPUT_DIR / f"{safe_name}.pdf")
 
     from engine.layout import render
@@ -233,7 +311,9 @@ def export_html_preview(req: ExportRequest):
     else:
         content = req.content
 
-    safe_name = req.filename.replace(" ", "_").replace("/", "_")
+    name = (content.get("meta") or {}).get("name", "")
+    safe_name = (_safe_filename(name, req.role, req.company)
+                 if (req.role or req.company) else (_safe_filename(name) or _slug(req.filename) or "cv"))
     out_path = str(OUTPUT_DIR / f"{safe_name}_preview.html")
 
     from engine.layout import render_html
@@ -241,6 +321,102 @@ def export_html_preview(req: ExportRequest):
 
     with open(out_path) as f:
         return {"html": f.read()}
+
+
+# ── Drafts ───────────────────────────────────────────────────────────────────
+@app.post("/api/draft")
+def save_draft(req: DraftRequest):
+    """Persist a tailored draft. Kept separate from the master profile so a CV
+    trimmed for one role never becomes the source for the next."""
+    slug = _safe_filename("", req.role, req.company, fallback="draft")
+    path = DRAFTS_DIR / f"{slug}.yaml"
+    payload = {"role": req.role, "company": req.company, "content": req.content}
+    with open(path, "w") as f:
+        yaml.dump(payload, f, default_flow_style=False, allow_unicode=True)
+    return {"saved": True, "slug": slug}
+
+
+@app.get("/api/drafts")
+def list_drafts():
+    drafts = []
+    for path in sorted(DRAFTS_DIR.glob("*.yaml")):
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f) or {}
+            drafts.append({
+                "slug": path.stem,
+                "role": data.get("role", ""),
+                "company": data.get("company", ""),
+            })
+        except Exception:
+            continue
+    return {"drafts": drafts}
+
+
+@app.get("/api/draft/{slug}")
+def get_draft(slug: str):
+    path = DRAFTS_DIR / f"{Path(slug).name}.yaml"
+    if not path.exists():
+        raise HTTPException(404, "Draft not found.")
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
+
+
+# ── Cover letter ──────────────────────────────────────────────────────────────
+@app.post("/api/cover-letter")
+def generate_cover_letter(req: CoverLetterRequest):
+    if not MASTER_PROFILE.exists():
+        raise HTTPException(400, "No master profile found. Go to Edit and save your CV first.")
+
+    with open(MASTER_PROFILE) as f:
+        profile = yaml.safe_load(f) or {}
+
+    jd_text = req.jd_text
+    errors = []
+    if req.url:
+        try:
+            jd_text = _fetch_url_text(req.url)
+        except Exception as e:
+            errors.append(f"Could not fetch URL: {e}. Writing from the role title only.")
+
+    target = {"role": req.role, "company": req.company, "jd_text": jd_text}
+
+    from engine.cover_letter import generate
+    letter, gen_errors = generate(
+        profile, target, tone=req.tone, length=req.length,
+        provider=req.provider, seniority_level=req.seniority or None,
+    )
+    errors.extend(gen_errors)
+
+    # Same no-fabrication guard the CV gets.
+    from engine.verify import verify_content
+    body = " ".join(letter.get("paragraphs", []) + [letter.get("closing", "")])
+    warnings = verify_content(profile, {"summary": body, "experience": []})
+
+    return {"letter": letter, "warnings": warnings, "errors": errors,
+            "jd_preview": jd_text[:500] if jd_text else ""}
+
+
+@app.post("/api/cover-letter/preview")
+def preview_cover_letter(req: CoverLetterRenderRequest):
+    from engine.templates.cover import render_cover_html
+    return {"html": render_cover_html(req.letter, None, req.template)}
+
+
+@app.post("/api/export/cover-letter/pdf")
+def export_cover_letter_pdf(req: CoverLetterRenderRequest):
+    meta = (req.letter.get("meta") or {})
+    target = (req.letter.get("target") or {})
+    role = req.role or target.get("role", "")
+    company = req.company or target.get("company", "")
+    safe_name = _safe_filename(meta.get("name", ""), role, company,
+                               kind="Cover Letter", fallback="cover_letter")
+
+    out_path = str(OUTPUT_DIR / f"{safe_name}.pdf")
+    from engine.templates.cover import render_cover_pdf
+    render_cover_pdf(req.letter, out_path, req.template)
+
+    return FileResponse(out_path, media_type="application/pdf", filename=f"{safe_name}.pdf")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -403,13 +579,27 @@ Rules:
   These should be more specific than suggestions — tied to the actual CV content.
 - fit_score: be realistic — a 90+ means near-perfect, 50-70 is a real candidate with gaps"""
 
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1200,
+    with client.messages.stream(
+        model="claude-opus-5",
+        max_tokens=16000,
+        thinking={"type": "adaptive"},
+        output_config={"effort": "medium"},
         messages=[{"role": "user", "content": prompt}],
-    )
+    ) as stream:
+        message = stream.get_final_message()
 
-    text = message.content[0].text.strip()
+    if message.stop_reason == "refusal":
+        raise ValueError("Request was declined by the safety system.")
+
+    # A truncated response yields invalid JSON. Say so plainly rather than
+    # surfacing a confusing "Unterminated string" parse error.
+    if message.stop_reason == "max_tokens":
+        raise ValueError(
+            "response was cut off at the token limit before the JSON was complete "
+            "— raise max_tokens or ask for fewer items"
+        )
+
+    text = "".join(b.text for b in message.content if b.type == "text").strip()
     # Strip markdown fences if present
     if text.startswith("```"):
         text = "\n".join(l for l in text.split("\n") if not l.startswith("```"))
@@ -504,13 +694,20 @@ Rules: key_points 3-5, strengths 3-5, gaps 2-4, suggestions 3-5, recommendations
 
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=1000,
+        max_tokens=4000,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_msg},
         ],
     )
+
+    # json_object mode guarantees valid JSON only if the response completes.
+    if resp.choices[0].finish_reason == "length":
+        raise ValueError(
+            "response was cut off at the token limit before the JSON was complete "
+            "— raise max_tokens or ask for fewer items"
+        )
 
     result = json.loads(resp.choices[0].message.content)
     result.setdefault("fit_score", 50)
@@ -663,30 +860,59 @@ def _compute_diff(master: dict, tailored: dict) -> list:
     m_order = [e.get("company", "") for e in m_exp]
     t_order = [e.get("company", "") for e in t_exp]
 
+    from engine.verify import match_bullets
+
     bullet_changes = []
+    rewrites = []
     for t_entry in t_exp:
         company = t_entry.get("company", "")
         m_entry = next((e for e in m_exp if e.get("company") == company), None)
-        if m_entry:
-            m_bullets = [b.get("text", "") if isinstance(b, dict) else str(b) for b in m_entry.get("bullets", [])]
-            t_bullets = [b.get("text", "") if isinstance(b, dict) else str(b) for b in t_entry.get("bullets", [])]
-            removed = [b for b in m_bullets if b not in t_bullets]
-            if removed:
-                bullet_changes.append({
+        if not m_entry:
+            continue
+
+        m_bullets = [b.get("text", "") if isinstance(b, dict) else str(b) for b in m_entry.get("bullets", [])]
+        t_bullets = [b.get("text", "") if isinstance(b, dict) else str(b) for b in t_entry.get("bullets", [])]
+
+        # Pair each tailored bullet with the master bullet it came from, so a
+        # reworded bullet reads as a rewrite rather than a delete plus an add.
+        pairs, unmatched = match_bullets(m_bullets, t_bullets)
+        matched_sources = {old for old, _ in pairs}
+
+        for bi, (original, tailored_text) in enumerate(pairs):
+            if original.strip() != tailored_text.strip():
+                rewrites.append({
+                    "id": f"bullet:{company}:{bi}",
                     "company": company,
-                    "removed": removed,
-                    "kept": t_bullets,
+                    "bullet_index": t_bullets.index(tailored_text),
+                    "original": original,
+                    "tailored": tailored_text,
                 })
 
-    if m_order != t_order or bullet_changes:
+        removed = [b for b in m_bullets if b not in matched_sources and b not in t_bullets]
+        if removed or unmatched:
+            bullet_changes.append({
+                "company": company,
+                "removed": removed,
+                "added": unmatched,
+                "kept": t_bullets,
+            })
+
+    if m_order != t_order or bullet_changes or rewrites:
+        if rewrites:
+            change_type = "rewritten"
+        elif m_order != t_order:
+            change_type = "reordered"
+        else:
+            change_type = "trimmed"
         changes.append({
             "section": "experience",
             "label": "Experience",
-            "type": "reordered" if m_order != t_order else "trimmed",
+            "type": change_type,
             "order_changed": m_order != t_order,
             "original_order": m_order,
             "tailored_order": t_order,
             "bullet_changes": bullet_changes,
+            "rewrites": rewrites,
         })
 
     # ── Skills ──
@@ -717,6 +943,9 @@ def _compute_diff(master: dict, tailored: dict) -> list:
             "tailored_count": len(t_speaking),
         })
 
+    for change in changes:
+        change.setdefault("id", change["section"])
+
     return changes
 
 
@@ -743,4 +972,19 @@ def _empty_profile() -> dict:
 
 
 # ── Static files (last — catches all remaining routes) ───────────────────────
-app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+class NoCacheStaticFiles(StaticFiles):
+    """Serve static assets with revalidation forced.
+
+    Without an explicit Cache-Control, browsers heuristically cache assets and
+    skip revalidation, so edits to app.js/style.css only appear after a hard
+    refresh. "no-cache" still allows the ETag 304 round-trip, so this costs
+    nothing on unchanged files.
+    """
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+app.mount("/", NoCacheStaticFiles(directory=str(STATIC_DIR), html=True), name="static")

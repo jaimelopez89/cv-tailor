@@ -10,6 +10,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen.canvas import Canvas
 
+from engine.metrics import renderable_metrics
 from engine.templates.base import BaseTemplate
 
 PAGE_W, PAGE_H = A4
@@ -164,7 +165,7 @@ class MeridianTemplate(BaseTemplate):
             h = self.draw_wrapped(c, summary, st, MAIN_X, y, MAIN_W); y -= h + 6
 
         # Metrics
-        metrics = ct.get("metrics",[])[:4]
+        metrics = renderable_metrics(ct.get("metrics"))
         if metrics:
             y -= 4
             n = len(metrics); mw = MAIN_W/n
@@ -338,8 +339,12 @@ class MeridianTemplate(BaseTemplate):
         notable_html = "".join(f'<p class="sidebar-notable">{self.h(n)}</p>' for n in ct.get("notable",[]))
 
         metrics_html = ""
-        for m in ct.get("metrics",[])[:4]:
+        for m in renderable_metrics(ct.get("metrics")):
             metrics_html += f'<div class="metric"><span class="metric-value">{self.h(m.get("value",""))}</span><span class="metric-label">{self.h(m.get("label",""))}</span></div>\n'
+        metrics_section = (
+            f'<section class="metrics"><div class="metrics-row">{metrics_html}</div></section>'
+            if metrics_html else ""
+        )
 
         html = self.html_head(f"{name} - CV", MERIDIAN_CSS,
             "https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Code+Pro&display=swap")
@@ -355,7 +360,7 @@ class MeridianTemplate(BaseTemplate):
   </aside>
   <main>
     <section class="summary"><h2>Summary</h2><p>{self.h(summary)}</p></section>
-    <section class="metrics"><div class="metrics-row">{metrics_html}</div></section>
+    {metrics_section}
     <section class="experience"><h2>Experience</h2>{self.html_experience(ct.get("experience",[]))}</section>
     <section class="ventures"><h2>Ventures &amp; Advisory</h2>{self.html_ventures(ct.get("ventures",[]))}</section>
     <section class="projects"><h2>Other Projects</h2>{self.html_projects(ct.get("projects",[]))}</section>
