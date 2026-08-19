@@ -23,3 +23,7 @@ fonts/
 # Editor
 .vscode/
 .idea/
+
+# Tailored drafts — personal content
+data/drafts/
+data/master_profile.backup-*.yaml

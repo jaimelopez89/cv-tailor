@@ -13,6 +13,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph
 
 from engine.fonts import ensure_fonts
+from engine.metrics import renderable_metrics
 from engine.sanitize import sanitize, sanitize_content
 
 PAGE_W, PAGE_H = A4
@@ -139,15 +140,18 @@ class BaseTemplate:
 </head>"""
 
     def html_metrics(self, metrics):
-        """Generate metrics row HTML."""
-        if not metrics:
+        """Generate metrics row HTML.
+
+        Returns an empty string when nothing is renderable — an empty row would
+        otherwise draw its borders and dividers around blank cells.
+        """
+        usable = renderable_metrics(metrics)
+        if not usable:
             return ""
         items = ""
-        for m in metrics[:4]:
-            if not isinstance(m, dict):
-                continue
-            v = self.h(m.get("value", ""))
-            l = self.h(m.get("label", ""))
+        for m in usable:
+            v = self.h(m["value"])
+            l = self.h(m["label"])
             items += f'<div class="metric"><span class="metric-value">{v}</span><span class="metric-label">{l}</span></div>\n'
         return f'<div class="metrics-row">\n{items}</div>'
 

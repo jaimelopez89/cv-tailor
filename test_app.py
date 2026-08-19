@@ -1,5 +1,6 @@
 """Tests for CV Tailor web app."""
 
+import copy
 import json
 import os
 import shutil
@@ -87,12 +88,15 @@ def isolated_data_dir(tmp_path, monkeypatch):
     data_dir.mkdir()
     output_dir = data_dir / "output"
     output_dir.mkdir()
+    drafts_dir = data_dir / "drafts"
+    drafts_dir.mkdir()
 
     import app as app_module
     monkeypatch.setattr(app_module, "DATA_DIR", data_dir)
     monkeypatch.setattr(app_module, "MASTER_PROFILE", data_dir / "master_profile.yaml")
     monkeypatch.setattr(app_module, "OUTPUT_DIR", output_dir)
     monkeypatch.setattr(app_module, "SETTINGS_FILE", data_dir / "settings.yaml")
+    monkeypatch.setattr(app_module, "DRAFTS_DIR", drafts_dir)
     return data_dir
 
 
@@ -504,3 +508,371 @@ class TestHelpers:
         from app import _fetch_url_text
         with pytest.raises(Exception):
             _fetch_url_text("http://localhost:99999/nonexistent")
+
+
+# ── Metric normalisation ──────────────────────────────────────────────────────
+class TestMetricNormalisation:
+    """The empty-boxes bug: sentence-shaped metrics rendered as blank cells."""
+
+    def test_splits_from_to_range_taking_the_achievement(self):
+        from engine.metrics import split_text_metric
+        value, label = split_text_metric(
+            "Increased marketing-impacted pipeline from EUR 500M to EUR 1.5bn."
+        )
+        assert value == "€1.5bn"
+        assert "pipeline" in label.lower()
+
+    def test_splits_single_figure(self):
+        from engine.metrics import split_text_metric
+        value, _ = split_text_metric("Grew MQL volume by 61% YoY.")
+        assert value == "61%"
+
+    def test_keeps_existing_value_label_shape(self):
+        from engine.metrics import normalize_metric
+        m = normalize_metric({"value": "3×", "label": "Team growth", "weight": 7})
+        assert m["value"] == "3×"
+        assert m["label"] == "Team growth"
+        assert m["weight"] == 7
+
+    def test_accepts_bare_string(self):
+        from engine.metrics import normalize_metric
+        assert normalize_metric("Generated EUR 330M in pipeline.")["value"] == "€330M"
+
+    def test_non_dict_entries_do_not_raise(self):
+        from engine.metrics import normalize_metric
+        assert normalize_metric(None)["value"] == ""
+
+    def test_renderable_drops_empty_metrics(self):
+        from engine.metrics import renderable_metrics
+        assert renderable_metrics([{"text": ""}, {"value": "", "label": ""}]) == []
+
+    def test_renderable_caps_at_four(self):
+        from engine.metrics import renderable_metrics
+        many = [{"value": f"{i}%", "label": f"M{i}"} for i in range(10)]
+        assert len(renderable_metrics(many)) == 4
+
+
+class TestTemplatesNeverRenderEmptyMetrics:
+    """No template may draw a metrics row it cannot fill."""
+
+    @staticmethod
+    def _profile(metrics):
+        """Isolated copy — SAMPLE_PROFILE is shared mutable state."""
+        profile = copy.deepcopy(SAMPLE_PROFILE)
+        profile["metrics"] = metrics
+        return profile
+
+    @pytest.mark.parametrize("template", ["ember", "meridian", "slate", "verdant", "folio"])
+    def test_empty_metrics_produce_no_row(self, template):
+        import re
+        from engine.layout import render_html
+
+        profile = self._profile([{"text": ""}, {"value": "", "label": ""}])
+        html = render_html(profile, None, template)
+
+        assert not re.search(r'<div class="metrics-row">', html)
+        assert not re.search(r'<div class="metric">', html)
+        assert not re.search(r'<section class="metrics">', html)
+
+    @pytest.mark.parametrize("template", ["ember", "meridian", "slate", "verdant", "folio"])
+    def test_real_metrics_still_render(self, template):
+        import re
+        from engine.layout import render_html
+
+        profile = self._profile([
+            {"value": "€1.5bn", "label": "Pipeline generated"},
+            {"value": "3×", "label": "Team growth"},
+        ])
+        html = render_html(profile, None, template)
+        assert len(re.findall(r'<div class="metric">', html)) == 2
+
+    @pytest.mark.parametrize("template", ["ember", "meridian", "slate", "verdant", "folio"])
+    def test_sentence_metrics_are_rescued(self, template):
+        """A profile straight from the importer should still show figures."""
+        import re
+        from engine.layout import render_html
+
+        profile = self._profile([{"text": "Grew pipeline from EUR 500M to EUR 1.5bn."}])
+        html = render_html(profile, None, template)
+        assert len(re.findall(r'<div class="metric">', html)) == 1
+        assert "1.5bn" in html
+
+
+# ── Seniority ────────────────────────────────────────────────────────────────
+class TestSeniority:
+    def test_detects_vp_from_title(self):
+        from engine.seniority import detect_seniority
+        assert detect_seniority("VP of Product Marketing", "")["level"] == "vp"
+
+    def test_detects_c_suite(self):
+        from engine.seniority import detect_seniority
+        assert detect_seniority("Chief Marketing Officer", "")["level"] == "c_suite"
+
+    def test_head_of_reads_as_vp(self):
+        from engine.seniority import detect_seniority
+        assert detect_seniority("Head of Growth", "")["level"] == "vp"
+
+    def test_jd_signals_lift_confidence(self):
+        from engine.seniority import detect_seniority
+        result = detect_seniority(
+            "VP Marketing",
+            "You will own the budget, lead multiple teams and report to the CEO.",
+        )
+        assert result["level"] == "vp"
+        assert result["confidence"] == "high"
+
+    def test_blank_input_defaults_to_lead_with_low_confidence(self):
+        from engine.seniority import detect_seniority
+        result = detect_seniority("", "")
+        assert result["level"] == "lead"
+        assert result["confidence"] == "low"
+
+    def test_tone_instructions_differ_by_level(self):
+        from engine.seniority import tone_instructions
+        assert tone_instructions("vp") != tone_instructions("ic")
+
+    def test_unknown_level_falls_back(self):
+        from engine.seniority import tone_profile
+        assert tone_profile("nonsense") == tone_profile("lead")
+
+
+# ── Fabrication guard ────────────────────────────────────────────────────────
+class TestVerifier:
+    def test_clean_rewrite_passes(self):
+        from engine.verify import verify_content
+        master = {
+            "summary": {"default": ""},
+            "experience": [{"company": "Acme", "bullets": [{"text": "Grew pipeline by 61%."}]}],
+        }
+        tailored = {
+            "summary": "",
+            "experience": [{"company": "Acme", "bullets": [{"text": "Drove 61% pipeline growth."}]}],
+        }
+        assert verify_content(master, tailored) == []
+
+    def test_invented_number_is_flagged(self):
+        from engine.verify import verify_content
+        master = {
+            "summary": {"default": ""},
+            "experience": [{"company": "Acme", "bullets": [{"text": "Grew pipeline by 61%."}]}],
+        }
+        tailored = {
+            "summary": "",
+            "experience": [{"company": "Acme", "bullets": [{"text": "Grew pipeline by 95%."}]}],
+        }
+        warnings = verify_content(master, tailored)
+        assert len(warnings) == 1
+        assert "95%" in warnings[0]
+
+    def test_unknown_employer_is_flagged(self):
+        from engine.verify import verify_content
+        warnings = verify_content(
+            {"summary": {"default": ""}, "experience": []},
+            {"summary": "", "experience": [{"company": "Ghost Inc", "bullets": []}]},
+        )
+        assert any("Ghost Inc" in w for w in warnings)
+
+    def test_currency_spelling_variants_are_equivalent(self):
+        from engine.verify import verify_content
+        master = {
+            "summary": {"default": ""},
+            "experience": [{"company": "Acme", "bullets": [{"text": "Generated EUR 1.5 billion."}]}],
+        }
+        tailored = {
+            "summary": "",
+            "experience": [{"company": "Acme", "bullets": [{"text": "Generated EUR 1.5bn."}]}],
+        }
+        assert verify_content(master, tailored) == []
+
+    def test_match_bullets_pairs_rewrites(self):
+        from engine.verify import match_bullets
+        pairs, unmatched = match_bullets(
+            ["Built the pipeline system from scratch over two years."],
+            ["Built pipeline system from scratch, shipping in two years."],
+        )
+        assert len(pairs) == 1
+        assert unmatched == []
+
+    def test_match_bullets_reports_unrelated_text(self):
+        from engine.verify import match_bullets
+        pairs, unmatched = match_bullets(["Ran the weekly sales report."], ["Klingon opera reviews."])
+        assert pairs == []
+        assert unmatched == ["Klingon opera reviews."]
+
+
+# ── Filenames ────────────────────────────────────────────────────────────────
+class TestFilenames:
+    def test_includes_role_and_company(self):
+        from app import _safe_filename
+        assert _safe_filename("Jaime López", "VP of Product Marketing", "Supermetrics") == \
+            "Jaime_López_-_VP_of_Product_Marketing_-_Supermetrics"
+
+    def test_name_only_when_untailored(self):
+        from app import _safe_filename
+        assert _safe_filename("Jaime López") == "Jaime_López"
+
+    def test_cover_letter_kind_is_included(self):
+        from app import _safe_filename
+        result = _safe_filename("Jane Doe", "Director", "Acme", kind="Cover Letter")
+        assert result == "Jane_Doe_-_Cover_Letter_-_Director_-_Acme"
+
+    def test_path_separators_are_stripped(self):
+        from app import _safe_filename
+        assert "/" not in _safe_filename("../../etc/passwd", "a/b", "c\\d")
+
+    def test_empty_input_uses_fallback(self):
+        from app import _safe_filename
+        assert _safe_filename("", "", "") == "cv"
+
+
+# ── Rewrite-aware diffs ──────────────────────────────────────────────────────
+class TestRewriteDiff:
+    def _profiles(self, tailored_bullet):
+        master = {
+            "summary": {"default": "S"}, "metrics": [], "skills": {}, "speaking": [],
+            "experience": [{"company": "Acme", "bullets": [
+                {"text": "Built the pipeline system from scratch over two years."},
+            ]}],
+        }
+        tailored = {
+            "summary": "S", "metrics": [], "skills": {}, "speaking": [],
+            "experience": [{"company": "Acme", "bullets": [{"text": tailored_bullet}]}],
+        }
+        return master, tailored
+
+    def test_rewritten_bullet_appears_as_a_rewrite(self):
+        from app import _compute_diff
+        master, tailored = self._profiles("Built pipeline system from scratch, shipping in two years.")
+        exp = next(d for d in _compute_diff(master, tailored) if d["section"] == "experience")
+        assert exp["type"] == "rewritten"
+        assert len(exp["rewrites"]) == 1
+        assert "shipping in two years" in exp["rewrites"][0]["tailored"]
+
+    def test_unchanged_bullet_produces_no_rewrite(self):
+        from app import _compute_diff
+        master, tailored = self._profiles("Built the pipeline system from scratch over two years.")
+        exp = [d for d in _compute_diff(master, tailored) if d["section"] == "experience"]
+        assert exp == [] or not exp[0]["rewrites"]
+
+    def test_every_change_carries_an_id(self):
+        from app import _compute_diff
+        master, tailored = self._profiles("Shipped the pipeline system in two years.")
+        assert all("id" in d for d in _compute_diff(master, tailored))
+
+
+# ── Cover letters ────────────────────────────────────────────────────────────
+class TestCoverLetter:
+    def test_fallback_letter_uses_only_profile_content(self):
+        from engine.cover_letter import _fallback_letter
+        letter = _fallback_letter(
+            copy.deepcopy(SAMPLE_PROFILE), {"role": "VP Marketing", "company": "Acme"}, {"level": "vp"}
+        )
+        assert letter["paragraphs"]
+        assert "VP Marketing" in letter["paragraphs"][0]
+
+    def test_finish_attaches_letterhead(self):
+        from engine.cover_letter import _finish
+        profile = copy.deepcopy(SAMPLE_PROFILE)
+        profile["meta"]["name"] = "Jane Doe"
+        letter = _finish(
+            {"paragraphs": ["Body."]}, profile,
+            {"role": "VP Marketing", "company": "Acme"}, {"level": "vp", "label": "VP"},
+        )
+        assert letter["meta"]["name"] == "Jane Doe"
+        assert letter["target"]["company"] == "Acme"
+        assert letter["signoff"]
+
+    def test_finish_drops_blank_paragraphs(self):
+        from engine.cover_letter import _finish
+        letter = _finish({"paragraphs": ["Real.", "  ", ""]}, SAMPLE_PROFILE, {}, {})
+        assert letter["paragraphs"] == ["Real."]
+
+    @pytest.mark.parametrize("template", ["ember", "meridian", "slate", "verdant", "folio"])
+    def test_renders_html_in_every_palette(self, template):
+        from engine.cover_letter import _fallback_letter, _finish
+        from engine.templates.cover import render_cover_html
+
+        profile = copy.deepcopy(SAMPLE_PROFILE)
+        profile["meta"]["name"] = "Jane Doe"
+        letter = _finish(
+            _fallback_letter(profile, {"role": "VP", "company": "Acme"}, {}),
+            profile, {"role": "VP", "company": "Acme"}, {"level": "vp"},
+        )
+        html = render_cover_html(letter, None, template)
+        assert "Jane Doe" in html
+        assert "Acme" in html
+
+    def test_renders_pdf(self, tmp_path):
+        from engine.cover_letter import _fallback_letter, _finish
+        from engine.templates.cover import render_cover_pdf
+
+        letter = _finish(
+            _fallback_letter(SAMPLE_PROFILE, {"role": "VP", "company": "Acme"}, {}),
+            SAMPLE_PROFILE, {"role": "VP", "company": "Acme"}, {"level": "vp"},
+        )
+        out = tmp_path / "letter.pdf"
+        render_cover_pdf(letter, str(out), "ember")
+        assert out.exists() and out.stat().st_size > 1000
+
+    def test_preview_endpoint(self, client):
+        from engine.cover_letter import _fallback_letter, _finish
+        letter = _finish(
+            _fallback_letter(SAMPLE_PROFILE, {"role": "VP", "company": "Acme"}, {}),
+            SAMPLE_PROFILE, {"role": "VP", "company": "Acme"}, {"level": "vp"},
+        )
+        res = client.post("/api/cover-letter/preview", json={"letter": letter, "template": "ember"})
+        assert res.status_code == 200
+        assert "<body>" in res.json()["html"]
+
+    def test_export_names_file_for_role_and_company(self, client):
+        from engine.cover_letter import _fallback_letter, _finish
+        letter = _finish(
+            _fallback_letter(SAMPLE_PROFILE, {"role": "VP Marketing", "company": "Acme"}, {}),
+            SAMPLE_PROFILE, {"role": "VP Marketing", "company": "Acme"}, {"level": "vp"},
+        )
+        res = client.post("/api/export/cover-letter/pdf", json={
+            "letter": letter, "template": "ember",
+            "role": "VP Marketing", "company": "Acme",
+        })
+        assert res.status_code == 200
+        disposition = res.headers["content-disposition"]
+        assert "Cover_Letter" in disposition
+        assert "Acme" in disposition
+
+
+# ── Drafts stay separate from the master profile ─────────────────────────────
+class TestDrafts:
+    def test_saving_a_draft_does_not_touch_the_master(self, client_with_profile):
+        client = client_with_profile
+        before = client.get("/api/profile").json()
+
+        draft = json.loads(json.dumps(before))
+        draft["experience"][0]["bullets"] = [draft["experience"][0]["bullets"][0]]
+        res = client.post("/api/draft", json={
+            "content": draft, "role": "VP Marketing", "company": "Acme",
+        })
+        assert res.status_code == 200
+
+        after = client.get("/api/profile").json()
+        assert after == before, "tailoring must never overwrite the master profile"
+
+    def test_draft_round_trips(self, client_with_profile):
+        client = client_with_profile
+        profile = client.get("/api/profile").json()
+        slug = client.post("/api/draft", json={
+            "content": profile, "role": "Director", "company": "Globex",
+        }).json()["slug"]
+
+        fetched = client.get(f"/api/draft/{slug}").json()
+        assert fetched["role"] == "Director"
+        assert fetched["company"] == "Globex"
+
+    def test_missing_draft_returns_404(self, client):
+        assert client.get("/api/draft/does-not-exist").status_code == 404
+
+    def test_drafts_are_listed(self, client_with_profile):
+        client = client_with_profile
+        profile = client.get("/api/profile").json()
+        client.post("/api/draft", json={"content": profile, "role": "VP", "company": "Initech"})
+        listed = client.get("/api/drafts").json()["drafts"]
+        assert any(d["company"] == "Initech" for d in listed)

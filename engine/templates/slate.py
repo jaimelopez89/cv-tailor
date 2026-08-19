@@ -11,6 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen.canvas import Canvas
 
+from engine.metrics import renderable_metrics
 from engine.templates.base import BaseTemplate
 
 PAGE_W, PAGE_H = A4
@@ -100,7 +101,7 @@ class SlateTemplate(BaseTemplate):
             y -= h + 4
 
         # Metrics - horizontal, minimal
-        metrics = ct.get("metrics", [])[:4]
+        metrics = renderable_metrics(ct.get("metrics"))
         if metrics:
             y -= 8
             n = len(metrics)
@@ -341,8 +342,12 @@ class SlateTemplate(BaseTemplate):
             summary = summary.get("default", "")
 
         metrics_html = ""
-        for m in ct.get("metrics", [])[:4]:
+        for m in renderable_metrics(ct.get("metrics")):
             metrics_html += f'<div class="metric"><span class="metric-value">{self.h(m.get("value", ""))}</span><span class="metric-label">{self.h(m.get("label", ""))}</span></div>\n'
+        metrics_section = (
+            f'<section class="metrics"><div class="metrics-row">{metrics_html}</div></section>'
+            if metrics_html else ""
+        )
 
         html = self.html_head(
             f"{name} - CV",
@@ -359,7 +364,7 @@ class SlateTemplate(BaseTemplate):
   </header>
   <hr class="header-rule">
   <section class="summary"><h2>Summary</h2><p>{self.h(summary)}</p></section>
-  <section class="metrics"><div class="metrics-row">{metrics_html}</div></section>
+  {metrics_section}
   <section class="experience"><h2>Experience</h2>{self.html_experience(ct.get("experience", []))}</section>
 </div>
 <div class="page page-2">

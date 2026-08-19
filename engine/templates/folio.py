@@ -11,6 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen.canvas import Canvas
 
+from engine.metrics import renderable_metrics
 from engine.templates.base import BaseTemplate
 
 PAGE_W, PAGE_H = A4
@@ -120,7 +121,7 @@ class FolioTemplate(BaseTemplate):
             y -= h + 4
 
         # Metrics - in date column style
-        metrics = ct.get("metrics", [])[:4]
+        metrics = renderable_metrics(ct.get("metrics"))
         if metrics:
             y -= 8
             c.setFont("Poppins-SemiBold", 7); c.setFillColor(TERRA)
@@ -416,8 +417,15 @@ class FolioTemplate(BaseTemplate):
 <div class="content-col"><strong>{self.h(e.get("school", ""))}</strong><p class="degree">{self.h(e.get("degree", ""))}</p></div></div>\n"""
 
         metrics_html = ""
-        for m in ct.get("metrics", [])[:4]:
+        for m in renderable_metrics(ct.get("metrics")):
             metrics_html += f'<div class="metric"><span class="metric-value">{self.h(m.get("value", ""))}</span><span class="metric-label">{self.h(m.get("label", ""))}</span></div>\n'
+
+        metrics_section = (
+            '<section class="metrics"><div class="entry-row">'
+            '<div class="date-col label">KEY METRICS</div>'
+            f'<div class="content-col"><div class="metrics-row">{metrics_html}</div></div>'
+            '</div></section>'
+        ) if metrics_html else ""
 
         html = self.html_head(
             f"{name} - CV",
@@ -437,9 +445,7 @@ class FolioTemplate(BaseTemplate):
   <section class="summary">
     <div class="entry-row"><div class="date-col label">SUMMARY</div><div class="content-col"><p>{self.h(summary)}</p></div></div>
   </section>
-  <section class="metrics">
-    <div class="entry-row"><div class="date-col label">KEY METRICS</div><div class="content-col"><div class="metrics-row">{metrics_html}</div></div></div>
-  </section>
+  {metrics_section}
   <section class="experience"><div class="section-header"><div class="date-col label">EXPERIENCE</div><div class="content-col"><hr></div></div>{exp_html}</section>
 </div>
 <div class="page page-2">
