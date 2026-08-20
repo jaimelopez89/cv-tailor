@@ -820,7 +820,9 @@ function renderTailorTab() {
               <span class="spinner"></span> Rendering…
             </div>
             <div class="preview-frame-wrapper" id="preview-frame-wrapper">
-              <iframe id="cv-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+              <div class="preview-frame-scroll" id="preview-frame-scroll">
+                <iframe id="cv-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+              </div>
             </div>
           </div>
         </div>
@@ -845,6 +847,7 @@ function renderTailorTab() {
       <div class="tailor-results-split">
         <div class="tailor-left-panel">
           ${renderDiff()}
+          ${renderInstructions()}
         </div>
         <div class="tailor-right-panel">
           <div class="preview-toolbar">
@@ -856,7 +859,9 @@ function renderTailorTab() {
             <span class="spinner"></span> Rendering…
           </div>
           <div class="preview-frame-wrapper" id="preview-frame-wrapper">
-            <iframe id="cv-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+            <div class="preview-frame-scroll" id="preview-frame-scroll">
+              <iframe id="cv-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+            </div>
           </div>
         </div>
       </div>
@@ -895,8 +900,8 @@ function setProvider(p) {
   );
 }
 
-async function runTailor() {
-  const btn = document.getElementById('tailor-btn');
+async function runTailor(opts = {}) {
+  const btn = document.getElementById(opts.btnId || 'tailor-btn');
   const url = document.getElementById('t-url').value.trim();
   const role = document.getElementById('t-role').value.trim();
   const company = document.getElementById('t-company').value.trim();
@@ -914,9 +919,11 @@ async function runTailor() {
   state._lastCompany = company;
   state._lastKeywords = keywords;
   state._lastJD = jd;
+  if (!opts.reuseFit) state._instructions = [];
 
+  const btnLabel = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Tailoring… (up to a minute)';
+  btn.innerHTML = `<span class="spinner"></span> ${opts.reuseFit ? 'Re-tailoring…' : 'Tailoring… (up to a minute)'}`;
 
   try {
     // Auto-save first
@@ -930,10 +937,13 @@ async function runTailor() {
       rewrite: state._rewrite !== false,
       provider: state.provider,
       seniority: state._seniorityOverride || '',
+      instructions: state._instructions || [],
+      reuse_fit: opts.reuseFit ? state._fit : null,
     });
     state.tailored = res.tailored;
     state.tailoredDiff = res.diff;
     state._fit = res.fit || null;
+    state._instructions = res.instructions || [];
     state._seniority = res.seniority || null;
     state._warnings = res.warnings || [];
     state._jdPreview = res.jd_preview;
@@ -953,8 +963,54 @@ async function runTailor() {
     setTimeout(() => banner.remove(), 8000);
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '✨ Tailor CV';
+    btn.innerHTML = btnLabel;
   }
+}
+
+// ── Interactive instructions ──────────────────────────────────────────────
+// Free-text directions the model carries out on the next pass. They live
+// alongside the diff so you can steer the rewrite without leaving the results.
+function renderInstructions() {
+  const list = state._instructions || [];
+  return `
+    <div class="card instruct-card">
+      <div class="card-header">
+        <h2>Tell it what to change</h2>
+        ${list.length ? `<span class="instruct-count">${list.length} active</span>` : ''}
+      </div>
+      <div class="card-body">
+        ${list.length ? `<div class="instruct-chips">${list.map((t, i) => `
+          <span class="instruct-chip">
+            <span>${esc(t)}</span>
+            <button class="instruct-remove" title="Remove" onclick="removeInstruction(${i})">✕</button>
+          </span>`).join('')}</div>` : ''}
+        <textarea id="instruct-input" class="instruct-input" rows="2"
+          placeholder="e.g. Lead with the Aiven revenue numbers. Drop the Wärtsilä bullets."
+          onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){addInstruction()}"></textarea>
+        <div class="instruct-actions">
+          <span class="text-muted" style="font-size:11px">⌘/Ctrl + Enter to send${list.length ? ' — re-tailors from your master CV with every note above' : ''}</span>
+          <button class="btn btn-primary btn-sm" id="instruct-btn" onclick="addInstruction()">↻ Re-tailor</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function addInstruction() {
+  const box = document.getElementById('instruct-input');
+  const text = (box?.value || '').trim();
+  if (!text && !(state._instructions || []).length) {
+    toast('Type what you want changed first.', 'error');
+    return;
+  }
+  state._instructions = state._instructions || [];
+  if (text) state._instructions.push(text);
+  if (box) box.value = '';
+  runTailor({ reuseFit: true, btnId: 'instruct-btn' });
+}
+
+function removeInstruction(i) {
+  state._instructions.splice(i, 1);
+  renderContent();
 }
 
 function renderDiff() {
@@ -1485,6 +1541,15 @@ function scaleFrame(wrapperId, frameId) {
   frame.style.height = naturalH + 'px';
   frame.style.transform = `scale(${scale})`;
   frame.style.transformOrigin = 'top left';
+
+  // A CSS transform shrinks what you see but not the layout box, so the wrapper
+  // would otherwise scroll the full unscaled height. Give it a spacer sized to
+  // the page as rendered.
+  const spacer = frame.parentElement;
+  if (spacer && spacer.classList.contains('preview-frame-scroll')) {
+    spacer.style.height = Math.ceil(naturalH * scale) + 'px';
+    spacer.style.width = Math.ceil(CV_W * scale) + 'px';
+  }
 }
 
 // ── Cover letter tab ──────────────────────────────────────────────────────
@@ -1584,7 +1649,9 @@ function renderCoverTab() {
             <span class="spinner"></span> Rendering…
           </div>
           <div class="preview-frame-wrapper" id="cover-frame-wrapper">
-            <iframe id="cover-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+            <div class="preview-frame-scroll" id="cover-frame-scroll">
+              <iframe id="cover-preview-frame" class="cv-preview-frame" sandbox="allow-same-origin"></iframe>
+            </div>
           </div>
         </div>
       </div>

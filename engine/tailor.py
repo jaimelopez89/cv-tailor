@@ -13,12 +13,26 @@ import yaml
 from engine.metrics import normalize_metric, renderable_metrics
 from engine.seniority import detect_seniority, tone_instructions, tone_profile
 
-MODEL = "claude-opus-5"
+# Tailoring is a high-volume, iterative loop — every refinement is another call.
+# Haiku is the cheap default; override with CV_TAILOR_MODEL to spend more.
+MODEL = os.environ.get("CV_TAILOR_MODEL", "claude-haiku-4-5")
+
+# Adaptive thinking and effort are Opus/Sonnet-5-class features; Haiku 4.5
+# rejects them. Sending neither is also what keeps a refinement loop cheap.
+_ADAPTIVE_THINKING_MODELS = ("claude-opus-", "claude-sonnet-5", "claude-fable-")
+
+
+def _reasoning_kwargs(model: str) -> dict:
+    """Thinking/effort params the given model actually accepts."""
+    if model.startswith(_ADAPTIVE_THINKING_MODELS):
+        return {"thinking": {"type": "adaptive"},
+                "output_config": {"effort": "high"}}
+    return {}
 
 
 def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = True,
            provider: str = "auto", recommendations: list = None,
-           seniority: dict = None) -> tuple[dict, list[str]]:
+           seniority: dict = None, instructions: list = None) -> tuple[dict, list[str]]:
     """Main entry: load master profile, tailor for target, return (content, errors).
 
     Args:
@@ -29,6 +43,7 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Tru
         provider: "auto" | "anthropic" | "openai" — which LLM provider to use
         recommendations: Fit-analysis recommendations for the model to act on
         seniority: Detected seniority dict; computed from the target when omitted
+        instructions: Free-text directions from the user, carried out verbatim
     Returns:
         (tailored_content, errors) where errors is a list of human-readable strings
     """
@@ -39,6 +54,7 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Tru
     if seniority is None:
         seniority = detect_seniority(target.get("role", ""), target.get("jd_text", ""))
     recommendations = recommendations or []
+    instructions = instructions or []
 
     if ai:
         use_anthropic = provider in ("auto", "anthropic") and os.environ.get("ANTHROPIC_API_KEY")
@@ -53,7 +69,7 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Tru
 
         if use_anthropic:
             try:
-                return _finish(_ai_tailor(master, target, rewrite, recommendations, seniority),
+                return _finish(_ai_tailor(master, target, rewrite, recommendations, seniority, instructions),
                                master, target, seniority), errors
             except Exception as e:
                 if provider == "anthropic":
@@ -63,7 +79,7 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Tru
 
         if use_openai:
             try:
-                return _finish(_openai_tailor(master, target, rewrite, recommendations, seniority),
+                return _finish(_openai_tailor(master, target, rewrite, recommendations, seniority, instructions),
                                master, target, seniority), errors
             except Exception as e:
                 if provider == "openai":
@@ -225,7 +241,8 @@ def _extract_tags(emphasis: list, jd_text: str) -> set:
     return tags
 
 
-def _shared_rules(target: dict, rewrite: bool, recommendations: list, seniority: dict) -> str:
+def _shared_rules(target: dict, rewrite: bool, recommendations: list, seniority: dict,
+                  instructions: list = None) -> str:
     """The tailoring contract shared by both providers."""
     target_desc = f"Company: {target.get('company', 'Unknown')}\n"
     target_desc += f"Role: {target.get('role', 'Unknown')}\n"
@@ -261,6 +278,18 @@ order. It never means adding, inflating, or implying something new."""
         rewrite_block = ("REWRITING — DISABLED. Select and reorder only. "
                          "Reproduce bullet text exactly as it appears in the master profile.")
 
+    instr_block = ""
+    if instructions:
+        instr_block = (
+            "\nYOUR INSTRUCTIONS — HIGHEST PRIORITY\n"
+            "The person whose CV this is has asked for the following, in their own words.\n"
+            "Carry each one out. Where an instruction conflicts with the fit-analysis\n"
+            "recommendations below, the instruction wins. Where it conflicts with the\n"
+            "no-fabrication rule, the no-fabrication rule wins and you carry out as much\n"
+            "of the instruction as the profile honestly supports.\n"
+            + "\n".join(f"- {i}" for i in instructions if i) + "\n"
+        )
+
     rec_block = ""
     if recommendations:
         lines = []
@@ -285,7 +314,7 @@ order. It never means adding, inflating, or implying something new."""
     return f"""TARGET:
 {target_desc}
 {tone_instructions(seniority['level'])}
-{rec_block}
+{instr_block}{rec_block}
 {rewrite_block}
 
 NO FABRICATION — the hard boundary:
@@ -309,7 +338,8 @@ TASKS:
 
 
 def _ai_tailor(master: dict, target: dict, rewrite: bool = True,
-               recommendations: list = None, seniority: dict = None) -> dict:
+               recommendations: list = None, seniority: dict = None,
+               instructions: list = None) -> dict:
     """Use the Claude API for intelligent tailoring."""
     import anthropic
 
@@ -322,7 +352,7 @@ def _ai_tailor(master: dict, target: dict, rewrite: bool = True,
 
     prompt = f"""Tailor this CV for the target role.
 
-{_shared_rules(target, rewrite, recommendations or [], seniority)}
+{_shared_rules(target, rewrite, recommendations or [], seniority, instructions or [])}
 
 MASTER PROFILE:
 {master_yaml}
@@ -340,9 +370,8 @@ notable: (copy from master exactly)"""
 
     with client.messages.stream(
         model=MODEL,
-        max_tokens=32000,
-        thinking={"type": "adaptive"},
-        output_config={"effort": "high"},
+        max_tokens=16000,
+        **_reasoning_kwargs(MODEL),
         system="You are an expert CV editor. Return only YAML. Rewrite aggressively "
                "for the target role while never altering a fact.",
         messages=[{"role": "user", "content": prompt}],
@@ -369,7 +398,8 @@ notable: (copy from master exactly)"""
 
 
 def _openai_tailor(master: dict, target: dict, rewrite: bool = True,
-                   recommendations: list = None, seniority: dict = None) -> dict:
+                   recommendations: list = None, seniority: dict = None,
+                   instructions: list = None) -> dict:
     """Use OpenAI gpt-4o-mini for tailoring (JSON output to avoid YAML parse issues)."""
     import json
     from openai import OpenAI
@@ -385,7 +415,7 @@ def _openai_tailor(master: dict, target: dict, rewrite: bool = True,
 
     user_msg = f"""Tailor this CV for the target role.
 
-{_shared_rules(target, rewrite, recommendations or [], seniority)}
+{_shared_rules(target, rewrite, recommendations or [], seniority, instructions or [])}
 
 MASTER PROFILE (JSON):
 {master_json}

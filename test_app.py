@@ -876,3 +876,125 @@ class TestDrafts:
         client.post("/api/draft", json={"content": profile, "role": "VP", "company": "Initech"})
         listed = client.get("/api/drafts").json()["drafts"]
         assert any(d["company"] == "Initech" for d in listed)
+
+
+# ── Interactive tailoring instructions ───────────────────────────────────────
+class TestTailorInstructions:
+    """User instructions are a first-class, highest-priority input to the prompt."""
+
+    def _seniority(self):
+        from engine.seniority import detect_seniority
+        return detect_seniority("VP Marketing", "")
+
+    def test_instruction_text_reaches_the_prompt(self):
+        from engine.tailor import _shared_rules
+        rules = _shared_rules({"role": "CMO"}, True, [], self._seniority(),
+                              instructions=["Drop the Wartsila bullets entirely"])
+        assert "Drop the Wartsila bullets entirely" in rules
+
+    def test_instructions_outrank_recommendations_in_the_prompt(self):
+        """Where the two conflict the user wins, so the user block must come first."""
+        from engine.tailor import _shared_rules
+        rules = _shared_rules({"role": "CMO"}, True,
+                              ["Add more demand-gen language"], self._seniority(),
+                              instructions=["Keep it to one page"])
+        assert rules.index("Keep it to one page") < rules.index("Add more demand-gen language")
+
+    def test_no_instructions_leaves_the_prompt_unchanged(self):
+        from engine.tailor import _shared_rules
+        sen = self._seniority()
+        assert (_shared_rules({"role": "CMO"}, True, [], sen, instructions=[])
+                == _shared_rules({"role": "CMO"}, True, [], sen))
+
+    def test_instructions_stay_subordinate_to_no_fabrication(self):
+        from engine.tailor import _shared_rules
+        rules = _shared_rules({"role": "CMO"}, True, [], self._seniority(),
+                              instructions=["Say I led the Kafka migration"])
+        assert "NO FABRICATION" in rules
+        assert rules.index("Say I led the Kafka migration") < rules.index("NO FABRICATION")
+
+    def test_endpoint_accepts_instructions(self, client_with_profile):
+        res = client_with_profile.post("/api/tailor", json={
+            "role": "CMO", "use_ai": False,
+            "instructions": ["Lead with the pipeline numbers"],
+        })
+        assert res.status_code == 200
+
+    def test_endpoint_echoes_instructions_back(self, client_with_profile):
+        """The UI rehydrates its instruction list from the response."""
+        res = client_with_profile.post("/api/tailor", json={
+            "role": "CMO", "use_ai": False,
+            "instructions": ["Lead with the pipeline numbers"],
+        })
+        assert res.json()["instructions"] == ["Lead with the pipeline numbers"]
+
+
+# ── Token economy on re-tailor ───────────────────────────────────────────────
+class TestFitReuse:
+    """A re-tailor must not pay for a second fit analysis — the JD hasn't changed."""
+
+    def test_reuse_fit_skips_the_analysis_call(self, client_with_profile, monkeypatch):
+        import app as app_module
+        calls = []
+
+        def _boom(*args, **kwargs):
+            calls.append(args)
+            return {"fit_score": 0, "recommendations": []}, []
+
+        monkeypatch.setattr(app_module, "_analyze_fit", _boom)
+        cached = {"fit_score": 72, "fit_label": "Strong Match", "recommendations": []}
+        res = client_with_profile.post("/api/tailor", json={
+            "role": "CMO", "use_ai": False, "reuse_fit": cached,
+        })
+        assert res.status_code == 200
+        assert calls == [], "fit analysis must not run when a cached fit is supplied"
+        assert res.json()["fit"]["fit_score"] == 72
+
+    def test_without_reuse_fit_the_analysis_still_runs(self, client_with_profile, monkeypatch):
+        import app as app_module
+        calls = []
+
+        def _spy(*args, **kwargs):
+            calls.append(args)
+            return {"fit_score": 0, "recommendations": []}, []
+
+        monkeypatch.setattr(app_module, "_analyze_fit", _spy)
+        client_with_profile.post("/api/tailor", json={"role": "CMO", "use_ai": False})
+        assert len(calls) == 1
+
+    def test_cached_fit_recommendations_still_reach_the_tailor(self, client_with_profile):
+        """Reusing the fit must not silently drop its recommendations."""
+        import engine.tailor as tailor_module
+        seen = {}
+        original = tailor_module.tailor
+
+        def _capture(*args, **kwargs):
+            seen["recommendations"] = kwargs.get("recommendations")
+            return original(*args, **kwargs)
+
+        tailor_module.tailor = _capture
+        try:
+            client_with_profile.post("/api/tailor", json={
+                "role": "CMO", "use_ai": False,
+                "reuse_fit": {"fit_score": 72, "recommendations": ["Name the role explicitly"]},
+            })
+        finally:
+            tailor_module.tailor = original
+        assert seen["recommendations"] == ["Name the role explicitly"]
+
+
+class TestTailorModel:
+    def test_tailoring_defaults_to_a_cheap_model(self):
+        import engine.tailor as tailor_module
+        assert tailor_module.MODEL == "claude-haiku-4-5"
+
+    def test_tailoring_model_is_overridable_by_env(self, monkeypatch):
+        import importlib
+        import engine.tailor as tailor_module
+        monkeypatch.setenv("CV_TAILOR_MODEL", "claude-opus-5")
+        try:
+            reloaded = importlib.reload(tailor_module)
+            assert reloaded.MODEL == "claude-opus-5"
+        finally:
+            monkeypatch.delenv("CV_TAILOR_MODEL", raising=False)
+            importlib.reload(tailor_module)

@@ -50,6 +50,8 @@ class TailorRequest(BaseModel):
     rewrite: bool = True
     provider: str = "auto"  # "auto" | "anthropic" | "openai"
     seniority: str = ""     # override the detected level
+    instructions: list[str] = []   # free-text directions, applied verbatim
+    reuse_fit: Optional[dict] = None  # skip re-analysis on a refinement pass
 
 
 class ExportRequest(BaseModel):
@@ -210,8 +212,14 @@ def tailor_cv(req: TailorRequest):
 
     # Fit analysis runs BEFORE tailoring so its recommendations become
     # instructions the tailor carries out, rather than advice shown on the side.
-    fit, fit_errors = _analyze_fit(master, jd_text, req.emphasis, req.role, req.company, req.provider)
-    errors.extend(fit_errors)
+    # A refinement pass sends the fit it already has: the JD and the master profile
+    # have not changed, so re-analysing them would buy nothing and cost a full call.
+    if req.reuse_fit:
+        fit = req.reuse_fit
+    else:
+        fit, fit_errors = _analyze_fit(master, jd_text, req.emphasis, req.role,
+                                       req.company, req.provider)
+        errors.extend(fit_errors)
 
     try:
         from engine.tailor import tailor
@@ -220,6 +228,7 @@ def tailor_cv(req: TailorRequest):
             ai=req.use_ai, rewrite=req.rewrite, provider=req.provider,
             recommendations=fit.get("recommendations", []),
             seniority=seniority,
+            instructions=req.instructions,
         )
         errors.extend(tailor_errors)
     except Exception as e:
@@ -236,6 +245,7 @@ def tailor_cv(req: TailorRequest):
         "diff": diff,
         "fit": fit,
         "seniority": seniority,
+        "instructions": req.instructions,
         "warnings": warnings,
         "jd_preview": jd_text[:500] if jd_text else "",
         "jd_text": jd_text,

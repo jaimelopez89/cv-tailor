@@ -381,10 +381,19 @@ textarea { resize: vertical; min-height: 90px; }
 .preview-frame-wrapper {
   border: 1px solid var(--border);
   border-radius: 0 0 var(--radius) var(--radius);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #e8e4de;
   position: relative;
   height: calc(100vh - 220px);
+  overscroll-behavior: contain;
+}
+/* Spacer sized by scaleFrame() to the scaled page height — without it the
+   transform-scaled iframe keeps its full unscaled layout box and the wrapper
+   scrolls far past the end of the CV. */
+.preview-frame-scroll {
+  position: relative;
+  margin: 0 auto;
 }
 /* Loading overlay inside wrapper */
 .preview-loading {
@@ -980,3 +989,56 @@ textarea { resize: vertical; min-height: 90px; }
 }
 .draft-metric-value { flex: 0 0 110px; font-weight: 600; }
 .draft-metric-label { flex: 1; }
+
+/* ── Interactive tailoring instructions ─────────────────────────────────── */
+.instruct-card { margin-top: 14px; }
+.instruct-count {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--accent, #8FA680);
+}
+.instruct-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.instruct-chip {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg, #FAF8F5);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.instruct-chip > span { overflow-wrap: anywhere; }
+.instruct-remove {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.instruct-remove:hover { color: var(--danger, #b91c1c); }
+.instruct-input {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: 12px;
+}
+.instruct-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
