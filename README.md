@@ -73,6 +73,9 @@ Notes:
   alert, with the server log at `$TMPDIR/cv-tailor-server.log`.
 - No Chrome? It falls back to your default browser and holds the server open
   until you press Ctrl+C.
+- The app forces native execution (`LSRequiresNativeExecution`). Without it macOS
+  runs script-based bundles under Rosetta, and the universal2 Python would then
+  load as x86_64 and fail on the arm64 wheels in `venv`.
 - The icon is generated, not committed by hand — rerun `python scripts/make_icon.py`
   after changing it.
 

@@ -12,6 +12,17 @@
 
 set -uo pipefail
 
+# macOS runs script-based .app bundles under Rosetta unless the bundle opts out,
+# and the base interpreter is a universal2 binary that inherits our architecture.
+# Translated, it loads as x86_64 and cannot open the arm64 wheels in venv. Get
+# back to native before anything starts Python.
+if [ -z "${CVTAILOR_NATIVE:-}" ] \
+   && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ] \
+   && [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then
+  export CVTAILOR_NATIVE=1
+  exec arch -arm64 "$0" "$@"
+fi
+
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR" || exit 1
 

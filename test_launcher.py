@@ -100,6 +100,31 @@ class TestLauncherScript:
         assert "start" in (res.stderr + res.stdout).lower()
 
 
+class TestRosettaLaunch:
+    """macOS runs script-based .app bundles under Rosetta unless told otherwise.
+
+    The base interpreter here is universal2, so it inherits the parent process's
+    architecture — translated to x86_64 it cannot load the arm64 wheels in venv.
+    """
+
+    @pytest.mark.skipif(
+        subprocess.run(["sysctl", "-n", "hw.optional.arm64"], capture_output=True,
+                       text=True).stdout.strip() != "1",
+        reason="Apple Silicon only")
+    def test_serves_the_app_when_launched_translated(self):
+        port = _free_port()
+        probe = BASE / f".probe-rosetta-{port}"
+        browser = f'bash -c "curl -sf http://127.0.0.1:{port}/api/templates -o {probe} || true"'
+        env = {**os.environ, "CVTAILOR_PORT": str(port), "CVTAILOR_BROWSER": browser}
+        try:
+            subprocess.run(["arch", "-x86_64", str(LAUNCHER)], env=env,
+                           timeout=90, capture_output=True, text=True)
+            assert probe.exists() and probe.stat().st_size > 0, \
+                "server did not come up when the launcher ran translated"
+        finally:
+            probe.unlink(missing_ok=True)
+
+
 class TestAppBundle:
     def test_bundle_has_an_executable_stub(self):
         stub = BUNDLE / "Contents" / "MacOS" / "CV Tailor"
@@ -115,6 +140,15 @@ class TestAppBundle:
             ["plutil", "-extract", "CFBundleExecutable", "raw", "-o", "-", str(plist)],
             capture_output=True, text=True).stdout.strip()
         assert name == "CV Tailor"
+
+    def test_bundle_asks_for_native_execution(self):
+        """Without this LaunchServices runs the script bundle under Rosetta."""
+        plist = BUNDLE / "Contents" / "Info.plist"
+        val = subprocess.run(
+            ["plutil", "-extract", "LSRequiresNativeExecution", "raw", "-o", "-", str(plist)],
+            capture_output=True, text=True)
+        assert val.returncode == 0, "LSRequiresNativeExecution missing from Info.plist"
+        assert val.stdout.strip() in ("true", "1")
 
     def test_bundle_has_an_icon(self):
         icon = BUNDLE / "Contents" / "Resources" / "cvtailor.icns"
