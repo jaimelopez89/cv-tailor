@@ -69,6 +69,10 @@ click **Add Keyboard Shortcut** → press the keys you want.
 
 Notes:
 
+- Launching while it is already running brings the existing window forward
+  instead of opening a second one. Chrome will not open two instances on one
+  profile — it hands the URL to the running session, which appears as a plain
+  tab — so the launcher holds a pid lock at `~/.cv-tailor/instance-<port>.pid`.
 - Chrome runs on its own profile (`~/.cv-tailor/chrome`), which is what lets the
   app quit cleanly. Your normal Chrome windows, tabs, and extensions are
   untouched.

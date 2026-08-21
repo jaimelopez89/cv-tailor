@@ -125,6 +125,67 @@ class TestRosettaLaunch:
             probe.unlink(missing_ok=True)
 
 
+class TestSingleInstance:
+    """A second launch must not delegate to the running Chrome session.
+
+    Chrome refuses a second instance on a locked --user-data-dir and hands the
+    URL to the running one instead, which opens a plain tab and returns at once.
+    """
+
+    def _lock(self, port):
+        return Path.home() / ".cv-tailor" / f"instance-{port}.pid"
+
+    def test_second_launch_does_not_open_another_window(self):
+        port = _free_port()
+        probe = BASE / f".probe-second-{port}"
+        first = subprocess.Popen(
+            [str(LAUNCHER)],
+            env={**os.environ, "CVTAILOR_PORT": str(port), "CVTAILOR_BROWSER": "sleep 12"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert _wait_for(port, up=True), "first launch never served"
+            time.sleep(1.0)
+            second = subprocess.run(
+                [str(LAUNCHER)],
+                env={**os.environ, "CVTAILOR_PORT": str(port),
+                     "CVTAILOR_BROWSER": f'bash -c "touch {probe}"'},
+                timeout=30, capture_output=True, text=True)
+            assert second.returncode == 0, second.stderr
+            assert not probe.exists(), \
+                "second launch opened another window instead of using the running one"
+            assert _answers(port), "second launch disturbed the running server"
+        finally:
+            probe.unlink(missing_ok=True)
+            first.terminate()
+            first.wait(timeout=15)
+
+    def test_a_stale_lock_does_not_block_launching(self):
+        """A crashed instance must not leave the app permanently unlaunchable."""
+        port = _free_port()
+        lock = self._lock(port)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("999999")  # a pid that cannot be alive
+        probe = BASE / f".probe-stale-{port}"
+        try:
+            subprocess.run(
+                [str(LAUNCHER)],
+                env={**os.environ, "CVTAILOR_PORT": str(port),
+                     "CVTAILOR_BROWSER": f'bash -c "touch {probe}"'},
+                timeout=60, capture_output=True, text=True)
+            assert probe.exists(), "a stale lock stopped the app from launching"
+        finally:
+            probe.unlink(missing_ok=True)
+            lock.unlink(missing_ok=True)
+
+    def test_the_lock_is_released_when_the_window_closes(self):
+        port = _free_port()
+        subprocess.run([str(LAUNCHER)],
+                       env={**os.environ, "CVTAILOR_PORT": str(port),
+                            "CVTAILOR_BROWSER": "true"},
+                       timeout=60, capture_output=True, text=True)
+        assert not self._lock(port).exists(), "lock outlived the window"
+
+
 class TestInstalledCopy:
     """Spotlight will not index a symlinked .app, so installing means copying.
 

@@ -31,6 +31,7 @@ URL="http://127.0.0.1:${PORT}"
 TIMEOUT="${CVTAILOR_TIMEOUT:-20}"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CHROME_PROFILE="${HOME}/.cv-tailor/chrome"
+LOCK="${HOME}/.cv-tailor/instance-${PORT}.pid"
 
 # Launched from Spotlight or the Dock there is no terminal to read, so failures
 # have to become something visible.
@@ -41,6 +42,19 @@ die() {
   fi
   exit 1
 }
+
+# Chrome will not open a second instance on a locked --user-data-dir; it hands
+# the URL to the running one, which shows a plain tab and returns immediately.
+# Detect our own instance first and just bring it forward.
+if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+  if [ -z "${CVTAILOR_BROWSER:-}" ]; then
+    osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is '"$(cat "$LOCK")"') to true' >/dev/null 2>&1
+  fi
+  echo "CV Tailor: already running — bringing it to the front."
+  exit 0
+fi
+# Nothing alive behind it, so a leftover lock is stale.
+rm -f "$LOCK"
 
 port_is_open() {
   # bash's /dev/tcp needs no extra tooling and is exact about "is anyone there".
@@ -82,6 +96,7 @@ fi
 
 # Stop only a server this script started, however we leave.
 cleanup() {
+  rm -f "$LOCK"
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null
     wait "$SERVER_PID" 2>/dev/null
@@ -90,9 +105,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ── Window ───────────────────────────────────────────────────────────────────
+mkdir -p "$(dirname "$LOCK")"
+
 if [ -n "${CVTAILOR_BROWSER:-}" ]; then
   # shellcheck disable=SC2086
-  eval $CVTAILOR_BROWSER
+  eval $CVTAILOR_BROWSER &
+  WINDOW_PID=$!
+  echo "$WINDOW_PID" > "$LOCK"
+  wait "$WINDOW_PID"
 elif [ -x "$CHROME" ]; then
   # A dedicated profile is what makes this blocking. Against the default profile
   # Chrome hands the URL to the running Chrome and exits at once, and we would
@@ -104,7 +124,10 @@ elif [ -x "$CHROME" ]; then
     --no-first-run \
     --no-default-browser-check \
     --window-size=1440,900 \
-    >/dev/null 2>&1
+    >/dev/null 2>&1 &
+  WINDOW_PID=$!
+  echo "$WINDOW_PID" > "$LOCK"
+  wait "$WINDOW_PID"
 else
   # No Chrome: fall back to the default browser. It cannot tell us when the tab
   # closes, so hold the server open until this process is stopped.
