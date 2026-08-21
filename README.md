@@ -52,11 +52,16 @@ open "CV Tailor.app"          # or double-click it in Finder
 ./scripts/cvtailor            # same thing, from a terminal
 ```
 
-To reach it from Spotlight and Launchpad, link it into Applications once:
+To reach it from Spotlight and Launchpad, install it once:
 
 ```bash
-ln -s "$PWD/CV Tailor.app" /Applications/
+./scripts/install_app.sh
 ```
+
+That copies the bundle to `/Applications` and bakes this project's path into the
+copy. Do not symlink it instead — Spotlight does not index symlinked app
+bundles, so a linked app never shows up in ⌘Space. Re-run the installer if you
+move the project.
 
 **Keyboard shortcut:** open **Shortcuts.app** → **+** → search *Open App* → drag
 it in → pick **CV Tailor** → in the sidebar (ⓘ) tick **Use as Quick Action** and

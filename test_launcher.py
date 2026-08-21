@@ -125,6 +125,37 @@ class TestRosettaLaunch:
             probe.unlink(missing_ok=True)
 
 
+class TestInstalledCopy:
+    """Spotlight will not index a symlinked .app, so installing means copying.
+
+    A copy lives outside the repo and cannot find the project by walking up from
+    its own path — the installer has to bake the location in.
+    """
+
+    def test_a_copy_outside_the_repo_still_serves_the_app(self, tmp_path):
+        installer = BASE / "scripts" / "install_app.sh"
+        assert installer.exists() and os.access(installer, os.X_OK), "installer missing"
+        subprocess.run([str(installer), str(tmp_path)], check=True,
+                       capture_output=True, text=True, timeout=60)
+
+        stub = tmp_path / "CV Tailor.app" / "Contents" / "MacOS" / "CV Tailor"
+        assert stub.exists(), "installer did not produce a bundle"
+        assert not (tmp_path / "CV Tailor.app").is_symlink(), \
+            "installed bundle must be a real copy, not a symlink"
+
+        port = _free_port()
+        probe = BASE / f".probe-copy-{port}"
+        env = {**os.environ, "CVTAILOR_PORT": str(port),
+               "CVTAILOR_BROWSER":
+                   f'bash -c "curl -sf http://127.0.0.1:{port}/api/templates -o {probe} || true"'}
+        try:
+            subprocess.run([str(stub)], env=env, timeout=90, capture_output=True, text=True)
+            assert probe.exists() and probe.stat().st_size > 0, \
+                "installed copy could not find and start the project"
+        finally:
+            probe.unlink(missing_ok=True)
+
+
 class TestAppBundle:
     def test_bundle_has_an_executable_stub(self):
         stub = BUNDLE / "Contents" / "MacOS" / "CV Tailor"

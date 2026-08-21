@@ -1,13 +1,25 @@
 #!/bin/bash
-# Bundle stub: hand off to the real launcher, resolving symlinks so this works
-# whether the .app is run in place or linked into /Applications.
-target="${BASH_SOURCE[0]}"
-while [ -L "$target" ]; do
-  link="$(readlink "$target")"
-  case "$link" in
-    /*) target="$link" ;;
-    *)  target="$(dirname "$target")/$link" ;;
-  esac
-done
-APP_DIR="$(cd "$(dirname "$target")/../.." && pwd)"
-exec "$(dirname "$APP_DIR")/scripts/cvtailor"
+# Bundle stub. An installed copy has its project path baked in by
+# scripts/install_app.sh; a bundle sitting in the repo works this out itself.
+PROJECT_DIR="__CVTAILOR_PROJECT_DIR__"
+
+if [ ! -x "${PROJECT_DIR}/scripts/cvtailor" ]; then
+  target="${BASH_SOURCE[0]}"
+  while [ -L "$target" ]; do
+    link="$(readlink "$target")"
+    case "$link" in
+      /*) target="$link" ;;
+      *)  target="$(dirname "$target")/$link" ;;
+    esac
+  done
+  APP_DIR="$(cd "$(dirname "$target")/../.." && pwd)"
+  PROJECT_DIR="$(dirname "$APP_DIR")"
+fi
+
+if [ ! -x "${PROJECT_DIR}/scripts/cvtailor" ]; then
+  osascript -e 'display alert "CV Tailor" message "Could not find the CV Tailor project. Re-run scripts/install_app.sh from the project folder." as critical' >/dev/null 2>&1
+  echo "CV Tailor: launcher not found under ${PROJECT_DIR}" >&2
+  exit 1
+fi
+
+exec "${PROJECT_DIR}/scripts/cvtailor"
