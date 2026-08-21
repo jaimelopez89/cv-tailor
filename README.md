@@ -42,6 +42,40 @@ python cv.py --target "Dir Product Marketing, Anthropic" --jd jd.txt --ai --prev
 
 Fonts are downloaded automatically on first run (~2MB from Google Fonts).
 
+## Open it as a Mac app
+
+`CV Tailor.app` starts the server, opens a standalone Chrome window with no tabs
+or address bar, and stops the server again when you close it.
+
+```bash
+open "CV Tailor.app"          # or double-click it in Finder
+./scripts/cvtailor            # same thing, from a terminal
+```
+
+To reach it from Spotlight and Launchpad, link it into Applications once:
+
+```bash
+ln -s "$PWD/CV Tailor.app" /Applications/
+```
+
+**Keyboard shortcut:** open **Shortcuts.app** → **+** → search *Open App* → drag
+it in → pick **CV Tailor** → in the sidebar (ⓘ) tick **Use as Quick Action** and
+click **Add Keyboard Shortcut** → press the keys you want.
+
+Notes:
+
+- Chrome runs on its own profile (`~/.cv-tailor/chrome`), which is what lets the
+  app quit cleanly. Your normal Chrome windows, tabs, and extensions are
+  untouched.
+- If a server is already running on the port, the app uses it and leaves it
+  running on exit — quitting the app will not kill a dev server you started.
+- Port is 8090; override with `CVTAILOR_PORT`. Startup errors surface as a macOS
+  alert, with the server log at `$TMPDIR/cv-tailor-server.log`.
+- No Chrome? It falls back to your default browser and holds the server open
+  until you press Ctrl+C.
+- The icon is generated, not committed by hand — rerun `python scripts/make_icon.py`
+  after changing it.
+
 ## Workflow
 
 ### Step 1: Import your source material

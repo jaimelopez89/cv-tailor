@@ -1,0 +1,104 @@
+#!/bin/bash
+# CV Tailor — open as a Mac app.
+#
+# Starts the local server if it isn't already up, opens it in a standalone
+# Chrome window, and stops the server again when that window closes.
+#
+# Overrides, mostly for the tests in test_launcher.py:
+#   CVTAILOR_PORT     port to serve on            (default 8090)
+#   CVTAILOR_BROWSER  command to open the window  (default Chrome in app mode)
+#   CVTAILOR_UVICORN  server command              (default the venv's uvicorn)
+#   CVTAILOR_TIMEOUT  seconds to wait for startup (default 20)
+
+set -uo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_DIR" || exit 1
+
+PORT="${CVTAILOR_PORT:-8090}"
+URL="http://127.0.0.1:${PORT}"
+TIMEOUT="${CVTAILOR_TIMEOUT:-20}"
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+CHROME_PROFILE="${HOME}/.cv-tailor/chrome"
+
+# Launched from Spotlight or the Dock there is no terminal to read, so failures
+# have to become something visible.
+die() {
+  echo "$1" >&2
+  if [ -z "${CVTAILOR_BROWSER:-}" ] && command -v osascript >/dev/null 2>&1; then
+    osascript -e "display alert \"CV Tailor\" message \"$1\" as critical" >/dev/null 2>&1
+  fi
+  exit 1
+}
+
+port_is_open() {
+  # bash's /dev/tcp needs no extra tooling and is exact about "is anyone there".
+  (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") >/dev/null 2>&1
+}
+
+# ── Server ───────────────────────────────────────────────────────────────────
+SERVER_PID=""
+
+if port_is_open; then
+  # Something is already serving this port — most likely a dev server started by
+  # hand. Use it, but leave it alone on the way out: we only clean up our own.
+  echo "CV Tailor: reusing the server already on port ${PORT}"
+else
+  if [ -n "${CVTAILOR_UVICORN:-}" ]; then
+    # shellcheck disable=SC2086
+    $CVTAILOR_UVICORN &
+  else
+    [ -d venv ] && source venv/bin/activate
+    # No --reload: the reloader forks a child that survives killing the parent,
+    # which would leave the port occupied after every quit.
+    python -m uvicorn app:app --port "$PORT" --host 127.0.0.1 \
+      >"${TMPDIR:-/tmp}/cv-tailor-server.log" 2>&1 &
+  fi
+  SERVER_PID=$!
+
+  deadline=$((SECONDS + TIMEOUT))
+  until port_is_open; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      die "The CV Tailor server exited on startup. See ${TMPDIR:-/tmp}/cv-tailor-server.log"
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      kill "$SERVER_PID" 2>/dev/null
+      die "The CV Tailor server did not start within ${TIMEOUT}s."
+    fi
+    sleep 0.2
+  done
+fi
+
+# Stop only a server this script started, however we leave.
+cleanup() {
+  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+    kill "$SERVER_PID" 2>/dev/null
+    wait "$SERVER_PID" 2>/dev/null
+  fi
+}
+trap cleanup EXIT INT TERM
+
+# ── Window ───────────────────────────────────────────────────────────────────
+if [ -n "${CVTAILOR_BROWSER:-}" ]; then
+  # shellcheck disable=SC2086
+  eval $CVTAILOR_BROWSER
+elif [ -x "$CHROME" ]; then
+  # A dedicated profile is what makes this blocking. Against the default profile
+  # Chrome hands the URL to the running Chrome and exits at once, and we would
+  # never learn that the window had closed.
+  mkdir -p "$CHROME_PROFILE"
+  "$CHROME" \
+    --app="$URL" \
+    --user-data-dir="$CHROME_PROFILE" \
+    --no-first-run \
+    --no-default-browser-check \
+    --window-size=1440,900 \
+    >/dev/null 2>&1
+else
+  # No Chrome: fall back to the default browser. It cannot tell us when the tab
+  # closes, so hold the server open until this process is stopped.
+  open "$URL"
+  echo "CV Tailor: Chrome not found — opened in your default browser."
+  echo "Press Ctrl+C to stop the server."
+  while true; do sleep 3600; done
+fi

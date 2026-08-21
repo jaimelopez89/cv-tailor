@@ -1,0 +1,13 @@
+#!/bin/bash
+# Bundle stub: hand off to the real launcher, resolving symlinks so this works
+# whether the .app is run in place or linked into /Applications.
+target="${BASH_SOURCE[0]}"
+while [ -L "$target" ]; do
+  link="$(readlink "$target")"
+  case "$link" in
+    /*) target="$link" ;;
+    *)  target="$(dirname "$target")/$link" ;;
+  esac
+done
+APP_DIR="$(cd "$(dirname "$target")/../.." && pwd)"
+exec "$(dirname "$APP_DIR")/scripts/cvtailor"
