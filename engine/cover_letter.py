@@ -22,6 +22,12 @@ LENGTHS = {"short": 250, "medium": 350, "long": 450}
 MODEL = "claude-opus-5"
 
 
+def _clean_letter(letter: dict) -> dict:
+    """Strip LLM artifacts from a letter before anyone sees or saves it."""
+    from engine.sanitize import sanitize_content
+    return sanitize_content(letter)
+
+
 def generate(profile: dict, target: dict, tone: str = "executive",
              length: str = "medium", provider: str = "auto",
              seniority_level: str = None) -> tuple[dict, list[str]]:
@@ -73,6 +79,7 @@ def generate(profile: dict, target: dict, tone: str = "executive",
 
 def _finish(letter: dict, profile: dict, target: dict, seniority: dict) -> dict:
     """Attach letterhead metadata and normalise the shape."""
+    letter = _clean_letter(letter)
     meta = profile.get("meta", {}) or {}
     paragraphs = [p.strip() for p in (letter.get("paragraphs") or []) if str(p).strip()]
     return {
@@ -157,6 +164,14 @@ CANDIDATE PROFILE (the ONLY source of facts)
 {_profile_digest(profile)}
 
 {tone_instructions(seniority['level'])}
+
+HOUSE STYLE - non-negotiable:
+- Never use em dashes or en dashes. Use a comma, a full stop, or a plain hyphen.
+- Use straight quotes and apostrophes, never curly ones.
+- Never write: delve, leverage, utilize, robust, seamless, pivotal, cutting-edge,
+  showcase, underscore, elevate, tapestry, realm, myriad, fast-paced.
+- Never write the "not just X, but Y" construction, or any variant of it.
+- Plain, concrete, specific. No press-release register.
 
 TONE: {tone_desc}
 LENGTH: about {words} words across 3-4 body paragraphs.

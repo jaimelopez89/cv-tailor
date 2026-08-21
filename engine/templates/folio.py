@@ -454,8 +454,8 @@ class FolioTemplate(BaseTemplate):
   <section class="education"><div class="section-header"><div class="date-col label">EDUCATION</div><div class="content-col"><hr></div></div>{edu_html}</section>
   <section class="projects"><div class="section-header"><div class="date-col label">PROJECTS</div><div class="content-col"><hr></div></div>{"".join(f'<div class="entry-row"><div class="date-col"></div><div class="content-col"><strong>{self.h(p.get("name",""))}</strong><p class="subtitle">{self.h(p.get("description",""))}</p></div></div>' for p in ct.get("projects",[]))}</section>
   <div class="two-col">
-    <section class="skills"><h2>Expertise</h2>{self.html_skills(ct.get("skills", {}))}</section>
-    <section class="speaking-notable"><h2>Speaking &amp; Notable</h2>{self.html_speaking(ct.get("speaking", []))}{self.html_notable(ct.get("notable", []))}</section>
+    {self.section("skills", "Expertise", self.html_skills(ct.get("skills", {})))}
+    {self.section("speaking-notable", "Speaking &amp; Notable", self.html_speaking(ct.get("speaking", [])) + self.html_notable(ct.get("notable", [])))}
   </div>
   <footer><span>{name}</span><span>Page 2</span></footer>
 </div>

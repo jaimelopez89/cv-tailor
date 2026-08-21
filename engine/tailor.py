@@ -94,6 +94,22 @@ def tailor(master_path: str, target: dict, ai: bool = False, rewrite: bool = Tru
     return _deterministic_tailor(master, target, seniority), errors
 
 
+# Sections the model may never introduce on its own. If the master profile has
+# nothing for a section, the tailored CV has nothing either — no prompt wording
+# can be relied on for this, so it is enforced here.
+_OPTIONAL_SECTIONS = ("projects", "notable", "speaking", "ventures", "metrics")
+
+
+def _drop_sections_absent_from_master(content: dict, master: dict) -> dict:
+    """Empty a section that the master profile does not actually have."""
+    for key in _OPTIONAL_SECTIONS:
+        source = master.get(key)
+        if not source:
+            existing = content.get(key)
+            content[key] = {} if isinstance(existing, dict) else []
+    return content
+
+
 def _finish(content: dict, master: dict, target: dict, seniority: dict) -> dict:
     """Normalise an AI response: resolve the summary, clean metrics, tag seniority."""
     if isinstance(content.get("summary"), dict):
@@ -102,6 +118,13 @@ def _finish(content: dict, master: dict, target: dict, seniority: dict) -> dict:
 
     # Metrics must always reach the template with value/label populated.
     content["metrics"] = renderable_metrics(content.get("metrics") or master.get("metrics", []))
+
+    content = _drop_sections_absent_from_master(content, master)
+
+    # Clean here rather than at render time: drafts, diffs and saved YAML all
+    # flow from this dict, and only the rendered CV was being sanitized before.
+    from engine.sanitize import sanitize_content
+    content = sanitize_content(content)
 
     content["_seniority"] = seniority
     return content
@@ -179,6 +202,11 @@ def _deterministic_tailor(master: dict, target: dict, seniority: dict = None) ->
 
     # Pass through: ventures, education, notable (no filtering)
     content["_target"] = target
+    content = _drop_sections_absent_from_master(content, master)
+
+    from engine.sanitize import sanitize_content
+    content = sanitize_content(content)
+
     content["_seniority"] = seniority
     return content
 
@@ -316,6 +344,19 @@ order. It never means adding, inflating, or implying something new."""
 {tone_instructions(seniority['level'])}
 {instr_block}{rec_block}
 {rewrite_block}
+
+HOUSE STYLE — non-negotiable:
+- Never use em dashes or en dashes. Use a comma, a full stop, or a plain hyphen.
+- Use straight quotes and apostrophes, never curly ones.
+- Never write: delve, leverage, utilize, robust, seamless, pivotal, cutting-edge,
+  showcase, underscore, elevate, tapestry, realm, myriad, fast-paced.
+- Never write the "not just X, but Y" construction, or any variant of it.
+- Plain, concrete, specific. If a sentence sounds like a press release, rewrite it.
+
+SECTIONS — do not invent:
+Return only the sections that carry content in the master profile. If a section
+is empty there, return it empty. Never add projects, notable items, speaking
+engagements, or ventures that are not already in the profile.
 
 NO FABRICATION — the hard boundary:
 Every fact, metric, employer, technology, and claim in your output must exist in

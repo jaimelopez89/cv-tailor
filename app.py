@@ -238,6 +238,11 @@ def tailor_cv(req: TailorRequest):
     from engine.verify import verify_content
     warnings = verify_content(master, tailored)
 
+    # Punctuation tells are stripped outright; wording a real CV might legitimately
+    # use is surfaced here instead, so the call stays yours.
+    from engine.sanitize import find_llm_isms_in
+    warnings.extend(find_llm_isms_in(tailored))
+
     diff = _compute_diff(master, tailored)
 
     return {

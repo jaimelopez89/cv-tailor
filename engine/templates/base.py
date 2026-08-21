@@ -122,6 +122,30 @@ class BaseTemplate:
 
     # ── HTML generators ──────────────────────────────────────────────────
 
+    @staticmethod
+    def section(cls_name, heading, body, items=None):
+        """Render a section, or nothing at all when it has no content.
+
+        The PDF paths have always guarded on emptiness; the HTML paths did not,
+        so a profile with `projects: []` still printed an "Other Projects"
+        heading with nothing under it. Every HTML section goes through here.
+        """
+        if items is not None:
+            if not items:
+                return ""
+        elif not (body or "").strip():
+            return ""
+        if not (body or "").strip():
+            return ""
+        return f'<section class="{cls_name}"><h2>{heading}</h2>{body}</section>'
+
+    @staticmethod
+    def sidebar_section(heading, body):
+        """Sidebar equivalent of section(): empty in, nothing out."""
+        if not (body or "").strip():
+            return ""
+        return f'<div class="sidebar-section"><h3>{heading}</h3>{body}</div>'
+
     def html_head(self, title, css, fonts_url):
         """Generate HTML <head> with embedded CSS and Google Fonts."""
         return f"""<!DOCTYPE html>

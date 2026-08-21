@@ -354,17 +354,17 @@ class MeridianTemplate(BaseTemplate):
   <aside class="sidebar">
     <div class="sidebar-header"><h1>{name}</h1><p class="tagline">{tagline}</p></div>
     <div class="sidebar-section"><h3>Contact</h3>{contact_html}</div>
-    <div class="sidebar-section"><h3>Expertise</h3>{skills_html}</div>
-    <div class="sidebar-section"><h3>Education</h3>{edu_html}</div>
-    <div class="sidebar-section"><h3>Beyond Work</h3>{notable_html}</div>
+    {self.sidebar_section("Expertise", skills_html)}
+    {self.sidebar_section("Education", edu_html)}
+    {self.sidebar_section("Beyond Work", notable_html)}
   </aside>
   <main>
     <section class="summary"><h2>Summary</h2><p>{self.h(summary)}</p></section>
     {metrics_section}
-    <section class="experience"><h2>Experience</h2>{self.html_experience(ct.get("experience",[]))}</section>
-    <section class="ventures"><h2>Ventures &amp; Advisory</h2>{self.html_ventures(ct.get("ventures",[]))}</section>
-    <section class="projects"><h2>Other Projects</h2>{self.html_projects(ct.get("projects",[]))}</section>
-    <section class="speaking"><h2>Speaking</h2>{self.html_speaking(ct.get("speaking",[]))}</section>
+    {self.section("experience", "Experience", self.html_experience(ct.get("experience",[])))}
+    {self.section("ventures", "Ventures &amp; Advisory", self.html_ventures(ct.get("ventures",[])))}
+    {self.section("projects", "Other Projects", self.html_projects(ct.get("projects",[])))}
+    {self.section("speaking", "Speaking", self.html_speaking(ct.get("speaking",[])))}
   </main>
 </div>
 </body></html>"""

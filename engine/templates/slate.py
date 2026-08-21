@@ -365,19 +365,19 @@ class SlateTemplate(BaseTemplate):
   <hr class="header-rule">
   <section class="summary"><h2>Summary</h2><p>{self.h(summary)}</p></section>
   {metrics_section}
-  <section class="experience"><h2>Experience</h2>{self.html_experience(ct.get("experience", []))}</section>
+  {self.section("experience", "Experience", self.html_experience(ct.get("experience", [])))}
 </div>
 <div class="page page-2">
   <div class="two-col">
     <div class="col-left">
-      <section class="ventures"><h2>Ventures &amp; Advisory</h2>{self.html_ventures(ct.get("ventures", []))}</section>
-      <section class="education"><h2>Education</h2>{self.html_education(ct.get("education", []))}</section>
-      <section class="projects"><h2>Other Projects</h2>{self.html_projects(ct.get("projects", []))}</section>
-      <section class="notable"><h2>Beyond Work</h2>{self.html_notable(ct.get("notable", []))}</section>
+      {self.section("ventures", "Ventures &amp; Advisory", self.html_ventures(ct.get("ventures", [])))}
+      {self.section("education", "Education", self.html_education(ct.get("education", [])))}
+      {self.section("projects", "Other Projects", self.html_projects(ct.get("projects", [])))}
+      {self.section("notable", "Beyond Work", self.html_notable(ct.get("notable", [])))}
     </div>
     <div class="col-right">
       <section class="skills"><h2>Expertise</h2>{self.html_skills(ct.get("skills", {}))}</section>
-      <section class="speaking"><h2>Speaking</h2>{self.html_speaking(ct.get("speaking", []))}</section>
+      {self.section("speaking", "Speaking", self.html_speaking(ct.get("speaking", [])))}
     </div>
   </div>
   <footer><p>Page 2</p></footer>

@@ -998,3 +998,124 @@ class TestTailorModel:
         finally:
             monkeypatch.delenv("CV_TAILOR_MODEL", raising=False)
             importlib.reload(tailor_module)
+
+
+# ── Empty sections must never render ─────────────────────────────────────────
+class TestNoEmptySections:
+    """A section with no content must not print its heading, in any template."""
+
+    HEADINGS = {
+        "projects": "Other Projects",
+        "notable": "Beyond Work",
+        "speaking": "Speaking",
+        "ventures": "Ventures",
+    }
+
+    def _profile(self):
+        p = copy.deepcopy(SAMPLE_PROFILE)
+        for key in self.HEADINGS:
+            p[key] = []
+        return p
+
+    @pytest.mark.parametrize("template", ["ember", "meridian", "slate", "verdant", "folio"])
+    def test_empty_sections_print_no_heading(self, template):
+        from engine.layout import render_html
+        html = render_html(self._profile(), None, template)
+        for key, heading in self.HEADINGS.items():
+            assert heading not in html, \
+                f"{template} printed '{heading}' for an empty {key} list"
+
+    @pytest.mark.parametrize("template", ["ember", "meridian", "slate", "verdant", "folio"])
+    def test_populated_sections_still_render(self, template):
+        from engine.layout import render_html
+        p = self._profile()
+        p["projects"] = [{"name": "HormuzWatch", "url": "", "description": "Vessel tracking"}]
+        html = render_html(p, None, template)
+        assert "HormuzWatch" in html
+
+    def test_missing_key_is_treated_as_empty(self):
+        from engine.layout import render_html
+        p = self._profile()
+        del p["projects"]
+        assert "Other Projects" not in render_html(p, None, "ember")
+
+
+class TestTailorCannotIntroduceSections:
+    """The model must not be able to add a section the master profile lacks."""
+
+    def test_section_empty_in_master_is_dropped_from_output(self):
+        from engine.tailor import _drop_sections_absent_from_master
+        master = {"experience": [{"company": "Acme"}], "projects": [], "notable": []}
+        tailored = {
+            "experience": [{"company": "Acme"}],
+            "projects": [{"name": "Invented Side Project"}],
+            "notable": ["Invented hobby"],
+        }
+        out = _drop_sections_absent_from_master(tailored, master)
+        assert out["projects"] == []
+        assert out["notable"] == []
+        assert out["experience"], "real sections must survive"
+
+    def test_section_present_in_master_is_kept(self):
+        from engine.tailor import _drop_sections_absent_from_master
+        master = {"projects": [{"name": "RevHunt"}]}
+        tailored = {"projects": [{"name": "RevHunt"}]}
+        assert _drop_sections_absent_from_master(tailored, master)["projects"]
+
+
+# ── LLM-isms ─────────────────────────────────────────────────────────────────
+class TestLLMisms:
+    def test_em_dash_is_removed(self):
+        from engine.sanitize import sanitize
+        assert "—" not in sanitize("Grew pipeline — by 200% — in a year")
+
+    def test_en_dash_between_words_is_removed(self):
+        from engine.sanitize import sanitize
+        assert "–" not in sanitize("Led the team – and shipped it")
+
+    def test_unambiguous_constructions_are_rewritten(self):
+        from engine.sanitize import sanitize
+        out = sanitize("Delve into the data to leverage insights in order to utilize resources")
+        low = out.lower()
+        for banned in ("delve", "leverage", "utilize", "in order to"):
+            assert banned not in low, f"{banned!r} survived: {out!r}"
+
+    def test_rewrites_preserve_sentence_case(self):
+        from engine.sanitize import sanitize
+        assert sanitize("Delve into the numbers").startswith("Examine")
+
+    def test_judgement_call_words_are_left_alone(self):
+        """Flagged, not rewritten — these are legitimate CV verbs."""
+        from engine.sanitize import sanitize
+        assert "Spearheaded" in sanitize("Spearheaded the robust rollout")
+
+    def test_flagger_reports_judgement_call_words(self):
+        from engine.sanitize import find_llm_isms
+        found = find_llm_isms("Spearheaded a seamless, robust rollout that showcased impact")
+        joined = " ".join(found).lower()
+        for w in ("seamless", "robust", "showcase"):
+            assert w in joined
+
+    def test_flagger_is_quiet_on_clean_text(self):
+        from engine.sanitize import find_llm_isms
+        assert find_llm_isms("Grew pipeline 200% and led a team of 12") == []
+
+    def test_flagger_catches_the_not_just_construction(self):
+        from engine.sanitize import find_llm_isms
+        assert find_llm_isms("This is not just a role, but a calling")
+
+
+class TestSanitizeAtTheOutputBoundary:
+    """Cleaning at render time leaves drafts, diffs and letters dirty."""
+
+    def test_tailor_output_is_clean(self, client_with_profile):
+        res = client_with_profile.post("/api/tailor", json={
+            "role": "CMO", "jd_text": "marketing", "use_ai": False})
+        assert "—" not in json.dumps(res.json()["tailored"])
+
+    def test_cover_letter_output_is_clean(self):
+        from engine.cover_letter import _clean_letter
+        letter = {"paragraphs": ["I would delve into this — deeply"], "closing": "Warmly —"}
+        out = _clean_letter(letter)
+        body = " ".join(out["paragraphs"] + [out["closing"]])
+        assert "—" not in body and "delve" not in body.lower()
