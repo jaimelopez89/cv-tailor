@@ -9,6 +9,7 @@
 #   CVTAILOR_BROWSER  command to open the window  (default Chrome in app mode)
 #   CVTAILOR_UVICORN  server command              (default the venv's uvicorn)
 #   CVTAILOR_TIMEOUT  seconds to wait for startup (default 20)
+#   CVTAILOR_RAISE    command to reopen a running window (default Chrome again)
 
 set -uo pipefail
 
@@ -44,13 +45,52 @@ die() {
 }
 
 # Chrome will not open a second instance on a locked --user-data-dir; it hands
-# the URL to the running one, which shows a plain tab and returns immediately.
-# Detect our own instance first and just bring it forward.
+# the URL to the running one and returns immediately, leaving us to kill the
+# server we just started. Detect our own instance first and reopen its window.
+chrome_window_pid() {
+  # The lock only survives a clean exit, so a window orphaned by a force-quit or
+  # a closed terminal is invisible to it. Chrome's own processes are not: the
+  # helpers carry --user-data-dir too, but only the browser itself has --app.
+  local pid args
+  for pid in $(pgrep -f -- "--user-data-dir=${CHROME_PROFILE}" 2>/dev/null); do
+    args="$(ps -o command= -p "$pid" 2>/dev/null)"
+    case "$args" in
+      *--type=*) continue ;;
+      *--app=*) echo "$pid"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+RUNNING=""
 if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
-  if [ -z "${CVTAILOR_BROWSER:-}" ]; then
-    osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is '"$(cat "$LOCK")"') to true' >/dev/null 2>&1
+  RUNNING="$(cat "$LOCK" 2>/dev/null)"
+elif [ -z "${CVTAILOR_BROWSER:-}" ]; then
+  RUNNING="$(chrome_window_pid || true)"
+fi
+
+if [ -n "$RUNNING" ]; then
+  # Raising the existing window is not possible: it is a second instance of the
+  # user's own Chrome, sharing com.google.Chrome, so it has no Dock icon or
+  # Cmd-Tab entry of its own and every "activate the app" call — Apple Events or
+  # `open` — resolves to their everyday Chrome. System Events can target our pid
+  # but needs Accessibility, which is usually not granted, and `set frontmost`
+  # does not un-minimize anyway. Once minimized the window is simply unreachable.
+  # Handing the URL to the running instance sidesteps all of it: that opens a
+  # fresh window, and a fresh window is never minimized.
+  if [ -n "${CVTAILOR_RAISE:-}" ]; then
+    # shellcheck disable=SC2086
+    eval $CVTAILOR_RAISE
+  elif [ -z "${CVTAILOR_BROWSER:-}" ] && [ -x "$CHROME" ]; then
+    "$CHROME" \
+      --app="$URL" \
+      --user-data-dir="$CHROME_PROFILE" \
+      --no-first-run \
+      --no-default-browser-check \
+      --window-size=1440,900 \
+      >/dev/null 2>&1
   fi
-  echo "CV Tailor: already running — bringing it to the front."
+  echo "CV Tailor: already running — reopening its window."
   exit 0
 fi
 # Nothing alive behind it, so a leftover lock is stale.
@@ -94,15 +134,33 @@ else
   done
 fi
 
+# Killing the window process alone can strand its children — Chrome's helpers,
+# or a wrapper shell — so take the whole tree down with it.
+kill_tree() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_tree "$child"
+  done
+  kill "$pid" 2>/dev/null
+}
+
 # Stop only a server this script started, however we leave.
 cleanup() {
   rm -f "$LOCK"
+  # The window is useless without the server and must never outlive it: an
+  # orphan shows "refused to connect", and Chrome then hands it the URL of
+  # every later launch, which is what made the app impossible to reopen.
+  if [ -n "${WINDOW_PID:-}" ] && kill -0 "$WINDOW_PID" 2>/dev/null; then
+    kill_tree "$WINDOW_PID"
+  fi
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null
     wait "$SERVER_PID" 2>/dev/null
   fi
 }
 trap cleanup EXIT INT TERM
+
+WINDOW_PID=""
 
 # ── Window ───────────────────────────────────────────────────────────────────
 mkdir -p "$(dirname "$LOCK")"

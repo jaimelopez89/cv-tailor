@@ -245,3 +245,81 @@ class TestAppBundle:
     def test_bundle_has_an_icon(self):
         icon = BUNDLE / "Contents" / "Resources" / "cvtailor.icns"
         assert icon.exists() and icon.stat().st_size > 0
+
+
+class TestOrphanedWindows:
+    """The window is useless without the server, so neither may outlive the other.
+
+    cleanup() killed the server and dropped the lock but left the window open.
+    That orphan then showed "refused to connect" / "Failed to fetch", and — being
+    invisible to a lock-file-only check — swallowed the URL of every later launch,
+    which is what made the app impossible to bring back up.
+    """
+
+    def _lock(self, port):
+        return Path.home() / ".cv-tailor" / f"instance-{port}.pid"
+
+    def test_stopping_the_launcher_closes_the_window_it_opened(self):
+        port = _free_port()
+        marker = BASE / f".orphan-{port}"
+        # A stand-in window that outlives its parent unless it is stopped.
+        tag = f"cvtailor-window-{port}"
+        browser = f'bash -c "touch {marker}; exec -a {tag} sleep 120"'
+        proc = subprocess.Popen(
+            [str(LAUNCHER)],
+            env={**os.environ, "CVTAILOR_PORT": str(port), "CVTAILOR_BROWSER": browser},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert _wait_for(port, up=True), "launch never served"
+            deadline = time.time() + 10
+            while not marker.exists() and time.time() < deadline:
+                time.sleep(0.1)
+            assert marker.exists(), "window stand-in never ran"
+
+            proc.terminate()          # Ctrl+C, a closed terminal, a force-quit
+            proc.wait(timeout=15)
+
+            leftover = subprocess.run(
+                ["pgrep", "-f", tag], capture_output=True, text=True).stdout.strip()
+            assert not leftover, \
+                "window survived the launcher and is now pointing at a dead server"
+        finally:
+            marker.unlink(missing_ok=True)
+            proc.poll() is None and proc.kill()
+            subprocess.run(["pkill", "-f", tag], capture_output=True)
+
+
+class TestReopeningAMinimizedWindow:
+    """A running window must be reachable again, not just detected.
+
+    The window is a second instance of the user's own Chrome and shares its
+    bundle id, so it has no Dock icon or Cmd-Tab entry of its own and cannot be
+    activated: Apple Events and `open` both resolve to their everyday Chrome,
+    and System Events needs Accessibility that is usually not granted. Minimized
+    it was unreachable, so a second launch has to open a fresh window instead.
+    """
+
+    def test_second_launch_reopens_a_window(self):
+        port = _free_port()
+        probe = BASE / f".probe-raise-{port}"
+        first = subprocess.Popen(
+            [str(LAUNCHER)],
+            env={**os.environ, "CVTAILOR_PORT": str(port), "CVTAILOR_BROWSER": "sleep 12"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            assert _wait_for(port, up=True), "first launch never served"
+            time.sleep(1.0)
+            second = subprocess.run(
+                [str(LAUNCHER)],
+                env={**os.environ, "CVTAILOR_PORT": str(port),
+                     "CVTAILOR_BROWSER": "true",
+                     "CVTAILOR_RAISE": f'bash -c "touch {probe}"'},
+                timeout=30, capture_output=True, text=True)
+            assert second.returncode == 0, second.stderr
+            assert probe.exists(), \
+                "a running instance was detected but its window was never reopened"
+            assert _answers(port), "reopening disturbed the running server"
+        finally:
+            probe.unlink(missing_ok=True)
+            first.terminate()
+            first.wait(timeout=15)
